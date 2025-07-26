@@ -1,2 +1,2 @@
 # dev-utils
-Developer Productivity Utilities
+Tools of the, software engineering, craft .
