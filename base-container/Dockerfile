@@ -13,7 +13,6 @@ ADD .bashrc /home/uknown/.bashrc
 RUN ln -fs /usr/bin/python3 /usr/bin/python; \
     apt-get update && apt-get install -y dos2unix git wget curl sudo unzip libglib2.0-0 libnss3 neovim xz-utils \
     virtualenv gcc libssl-dev pkg-config net-tools iputils-ping python3-pip && \
-     virtualenv /home/uknown/venv/default && \
     groupadd -g ${NEO4J_GID} ${NEO4J_UNAME}; \
     useradd ${NEO4J_UNAME} -u ${NEO4J_UID} -g ${NEO4J_GID}; \
     groupadd -g ${USER_GID} uknown; \
