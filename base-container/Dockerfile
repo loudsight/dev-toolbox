@@ -23,9 +23,9 @@ RUN ln -fs /usr/bin/python3 /usr/bin/python; \
     mkdir -p /opt/programs/python/venvs/ && \
     chown -R uknown:uknown /opt && \
     dos2unix /home/uknown/.bashrc && \
-    pushd /opt/programs/python/venvs/ && \
+    cd /opt/programs/python/venvs/ && \
     virtualenv working && \
-    popd
+    cd -cd
 
 ENV PATH="/home/programs/nvm/versions/node/current/bin/:${PATH}"
 
