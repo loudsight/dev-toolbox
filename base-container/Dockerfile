@@ -21,10 +21,10 @@ RUN ln -fs /usr/bin/python3 /usr/bin/python; \
     chmod 0440 /etc/sudoers.d/uknown && \
     chown -R uknown:uknown /home/uknown && \
     mkdir -p /opt/programs/python/venvs/ && \
-    chown -R uknown:uknown /opt && \
     dos2unix /home/uknown/.bashrc && \
     cd /opt/programs/python/venvs/ && \
     virtualenv working && \
+    chown -R uknown:uknown /opt && \
     cd -
 
 ENV PATH="/home/programs/nvm/versions/node/current/bin/:${PATH}"
