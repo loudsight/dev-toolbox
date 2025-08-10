@@ -23,7 +23,11 @@ RUN ln -fs /usr/bin/python3 /usr/bin/python; \
     chown -R uknown:uknown /home/uknown && \
     mkdir -p /opt && \
     chown -R uknown:uknown /opt && \
-    dos2unix /home/uknown/.bashrc
+    dos2unix /home/uknown/.bashrc && \
+    mkdir -p /opt/programs/python/venvs/ && \
+    pushd /opt/programs/python/venvs/ && \
+    virtualenv working && \
+    popd
 
 ENV PATH="/home/programs/nvm/versions/node/current/bin/:${PATH}"
 
