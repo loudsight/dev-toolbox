@@ -21,10 +21,9 @@ RUN ln -fs /usr/bin/python3 /usr/bin/python; \
     echo "uknown ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/uknown && \
     chmod 0440 /etc/sudoers.d/uknown && \
     chown -R uknown:uknown /home/uknown && \
-    mkdir -p /opt && \
+    mkdir -p /opt/programs/python/venvs/ && \
     chown -R uknown:uknown /opt && \
     dos2unix /home/uknown/.bashrc && \
-    mkdir -p /opt/programs/python/venvs/ && \
     pushd /opt/programs/python/venvs/ && \
     virtualenv working && \
     popd
