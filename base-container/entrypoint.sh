@@ -1,4 +1,4 @@
 #!/bin/bash
 
-/opt/myEnv.sh
+. /opt/myEnv.sh
 bash
