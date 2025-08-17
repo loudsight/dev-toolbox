@@ -19,12 +19,11 @@ RUN ln -fs /usr/bin/python3 /usr/bin/python; \
     useradd uknown -u ${USER_UID} -g ${USER_GID} --create-home --groups audio,video,sudo; \
     echo "uknown ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/uknown && \
     chmod 0440 /etc/sudoers.d/uknown && \
-    chown -R uknown:uknown /home/uknown && \
     mkdir -p /home/uknown/python/venvs/ && \
     dos2unix /home/uknown/.bashrc && \
-    mkdir -p /home/uknown && chown uknown:uknown /home/uknown && \
     cd /home/uknown/python/venvs/ && \
     virtualenv working && \
+    chown -R uknown:uknown /home/uknown && \
     chmod -R o+rw /home/uknown && \
     chown -R uknown:uknown /opt && \
     cd - \
