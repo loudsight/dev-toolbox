@@ -20,17 +20,16 @@ RUN ln -fs /usr/bin/python3 /usr/bin/python; \
     echo "uknown ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/uknown && \
     chmod 0440 /etc/sudoers.d/uknown && \
     chown -R uknown:uknown /home/uknown && \
-    mkdir -p /opt/server_helper/python/venvs/ && \
+    mkdir -p /home/uknown/python/venvs/ && \
     dos2unix /home/uknown/.bashrc && \
-    cd /opt/server_helper/python/venvs/ && \
+    mkdir -p /home/uknown && chown uknown:uknown /home/uknown && \
+    cd /home/uknown/python/venvs/ && \
     virtualenv working && \
+    chmod -R o+rw /home/uknown && \
     chown -R uknown:uknown /opt && \
-    cd -
+    cd - \
+    echo "$(date)" > /home/created_on.txt
 
 ENV PATH="/home/programs/nvm/versions/node/current/bin/:${PATH}"
-
-RUN mkdir -p /home/uknown && chown uknown:uknown /home/uknown && \
-    chmod -R o+rw /home/uknown && \
-    echo "$(date)" > /home/created_on.txt
 
 USER uknown
