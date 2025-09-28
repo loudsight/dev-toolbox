@@ -1,4 +1,4 @@
-FROM docker.io/python:3.12-slim AS dev-container
+FROM docker.io/python:3.13-slim-bookwork AS dev-container
 
 ARG NEO4J_UID
 
