@@ -1,4 +1,5 @@
-FROM docker.io/python:3.13-slim-bookwork AS dev-container
+#FROM mcr.microsoft.com/devcontainers/base:debian-12 AS dev-container
+FROM docker.io/python:3.13-slim-bookworm AS dev-container
 
 ARG NEO4J_UID
 
