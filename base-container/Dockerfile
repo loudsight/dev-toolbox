@@ -10,6 +10,7 @@ ARG USER_GID
 ARG HOST
 
 ADD .bashrc /home/uknown/.bashrc
+ADD myEnv.sh /opt/myEnv.sh
 
 RUN ln -fs /usr/bin/python3 /usr/bin/python; \
     apt-get update && apt-get install -y dos2unix git wget curl sudo unzip libglib2.0-0 libnss3 neovim xz-utils \

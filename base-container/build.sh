@@ -16,6 +16,8 @@ else
   NEO4J_GID="$(id -g $NEO4J_UNAME)"
 fi
 
+cp $WORK_ROOT/myEnv.sh .
+
 docker build \
  --build-arg USER_UID="$USER_UID" \
  --build-arg USER_GID="$USER_GID" \
@@ -23,3 +25,5 @@ docker build \
  --build-arg NEO4J_GID="$NEO4J_GID" \
  --build-arg NEO4J_UNAME="$NEO4J_UNAME" \
  -t localhost:5000/loudsight/dev-container:0.0.1 .
+
+rm -f myEnv.sh
