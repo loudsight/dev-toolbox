@@ -17,4 +17,4 @@
 #fi
 
 docker build \
- -t localhost:5000/loudsight/vscode-container:0.0.1 .
+ -t localhost:5001/loudsight/vscode-container:0.0.1 .

@@ -12,4 +12,4 @@ docker run -it --name code-server -p 127.0.0.1:8080:8080 \
   -v "c:/dev/code/synergisms/:/home/coder/project" \
   -u "$(id -u):$(id -g)" \
   -e "DOCKER_USER=$USER" \
-  localhost:5000/loudsight/vscode-container:0.0.1
+  localhost:5001/loudsight/vscode-container:0.0.1
