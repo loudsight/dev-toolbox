@@ -4,9 +4,11 @@ import java.util.function.Consumer;
 
 public class DatabusExample {
     interface Databus {
+        @FunctionalInterface
         interface Publisher<T> {
             public void publish(T publication);
         }
+        @FunctionalInterface
         interface Subscriber<T> {
             public void subscribe(Consumer<T> handler);
         }
@@ -56,6 +58,7 @@ public class DatabusExample {
 
     static class ProcessOne {
         int statusCode = 0;
+        @FunctionalInterface
         interface Status {
             int code();
         }
@@ -73,6 +76,7 @@ public class DatabusExample {
 
     static class ProcessTwo {
 
+        @FunctionalInterface
         interface Status {
             int code();
         }

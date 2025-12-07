@@ -10,15 +10,15 @@ ARG USER_GID
 ARG HOST
 
 ADD .bashrc /home/uknown/.bashrc
-ADD myEnv.sh /opt/myEnv.sh
+ADD build/opt/myEnv.sh /opt/myEnv.sh
 
-RUN ln -fs /usr/bin/python3 /usr/bin/python; \
+RUN ln -fs /usr/bin/python3 /usr/bin/python && \
     apt-get update && apt-get install -y dos2unix git wget curl sudo unzip libglib2.0-0 libnss3 neovim xz-utils \
     virtualenv gcc libssl-dev pkg-config net-tools iputils-ping python3-pip && \
-    groupadd -g ${NEO4J_GID} ${NEO4J_UNAME}; \
-    useradd ${NEO4J_UNAME} -u ${NEO4J_UID} -g ${NEO4J_GID}; \
-    groupadd -g ${USER_GID} uknown; \
-    useradd uknown -u ${USER_UID} -g ${USER_GID} --create-home --groups audio,video,sudo; \
+    groupadd -f -g ${NEO4J_GID} ${NEO4J_UNAME} && \
+    useradd -m ${NEO4J_UNAME} -u ${NEO4J_UID} -g ${NEO4J_GID} 2>/dev/null || true && \
+    groupadd -f -g ${USER_GID} uknown && \
+    useradd -m uknown -u ${USER_UID} -g ${USER_GID} --groups audio,video,sudo 2>/dev/null || true && \
     echo "uknown ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/uknown && \
     chmod 0440 /etc/sudoers.d/uknown && \
     mkdir -p /home/uknown/python/venvs/ && \
@@ -28,7 +28,7 @@ RUN ln -fs /usr/bin/python3 /usr/bin/python; \
     chown -R uknown:uknown /home/uknown && \
     chmod -R o+rw /home/uknown && \
     chown -R uknown:uknown /opt && \
-    cd - \
+    cd / && \
     echo "$(date)" > /home/created_on.txt
 
 ENV PATH="/home/programs/nvm/versions/node/current/bin/:${PATH}"
