@@ -6,12 +6,13 @@ public class DatabusExample {
     interface Databus {
         @FunctionalInterface
         interface Publisher<T> {
-            public void publish(T publication);
+            void publish(T publication);
         }
         @FunctionalInterface
         interface Subscriber<T> {
-            public void subscribe(Consumer<T> handler);
+            void subscribe(Consumer<T> handler);
         }
+        @FunctionalInterface
         interface Topic {}
 
         <T> Publisher<T> makePublisher(Topic topic, Class<?> publishedType);
