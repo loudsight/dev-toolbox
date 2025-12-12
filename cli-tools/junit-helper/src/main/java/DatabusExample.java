@@ -12,7 +12,6 @@ public class DatabusExample {
         interface Subscriber<T> {
             void subscribe(Consumer<T> handler);
         }
-        @FunctionalInterface
         interface Topic {}
 
         <T> Publisher<T> makePublisher(Topic topic, Class<?> publishedType);
