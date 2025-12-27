@@ -1,6 +1,6 @@
 #!/bin/bash
 
-user=uknown
+user=ubuntu
 
 USER_UID="$(id -u $user)"
 USER_GID="$(id -g $user)"
