@@ -1,6 +1,6 @@
 #!/bin/bash
 
-user=ubuntu
+user="$(whoami)"
 
 USER_UID="$(id -u $user)"
 USER_GID="$(id -g $user)"
