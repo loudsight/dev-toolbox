@@ -12,7 +12,7 @@
     <version>0.0.1-SNAPSHOT</version>
     <artifactId>cli-tools</artifactId>
     <packaging>pom</packaging>
-    <name>CLI Tools</name>
+    <name>Loudsight CLI Tools</name>
     <description>Loudsight CLI Tools</description>
 
     <properties>

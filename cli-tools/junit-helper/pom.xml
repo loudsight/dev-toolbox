@@ -12,7 +12,7 @@
     <version>0.0.1-SNAPSHOT</version>
 
     <artifactId>junit-helper</artifactId>
-    <name>CLI Tools</name>
+    <name>Loudsight CLI Tools</name>
     <description>Loudsight junit helper</description>
 
     <properties>
