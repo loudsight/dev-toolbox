@@ -1,6 +1,14 @@
 #FROM mcr.microsoft.com/devcontainers/base:debian-12 AS dev-container
 FROM docker.io/python:3.13-slim-bookworm AS dev-container
 
+# Base image for essentially every deployment module's Dockerfile (backend-server,
+# authentication-server, dev-web, aeron-media-driver, persistence-server, and several
+# platform/* services) - it is never itself "in use" by a running container between builds,
+# so platform/cron/clean.sh's aggressive `docker image prune -af` was sweeping it after 24h
+# with nothing to detect/rebuild it, silently breaking every deploy that depends on it until
+# someone noticed. This label lets clean.sh exclude it explicitly.
+LABEL retain="true"
+
 ARG USER_UID
 ARG USER_GID
 ARG HOST
