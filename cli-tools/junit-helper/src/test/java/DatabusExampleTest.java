@@ -22,22 +22,10 @@ public class DatabusExampleTest {
             DatabusExample.ProcessOne processOne = new DatabusExample.ProcessOne(databus);
             executorService.submit(() -> {while (running.get()) {processOne.publishStatus();}});
 
-            var latch = new CountDownLatch(10);
-            var publications = new ArrayList<DatabusExample.ProcessTwo.Status>();
-            databus.makeSubscriber(DatabusExample.Topics.PROCESS_TWO_STATUS, DatabusExample.ProcessTwo.Status.class,
-                    status -> {
-                        publications.add((DatabusExample.ProcessTwo.Status) status);
-                        latch.countDown();
-                        if (latch.getCount() == 0) {
-                            running.set(false);
-                        }
-                    });
             // this databus doesn't know anything about the internals of processOne and ProcessTwo
             // All we care about is that when the system is started up ProcessTwo publishes an incrementing status
             // Which proves that system is up and functioning - similar to an integration test
-            assertTrue(latch.await(10L, java.util.concurrent.TimeUnit.SECONDS));
-            AtomicInteger statusCode = new AtomicInteger(1);
-            publications.forEach(it -> assertEquals(statusCode.getAndIncrement(), it.code()));
+            assertProcessTwoPublishesIncrementingStatuses(databus, running, 1);
         }
     }
 
@@ -84,23 +72,38 @@ public class DatabusExampleTest {
                 while (running.get()) {processOnePublisher.publish((DatabusExample.ProcessOne.Status) statusCode::getAndIncrement);}
             });
 
-            var latch = new CountDownLatch(10);
-            var publications = new ArrayList<DatabusExample.ProcessTwo.Status>();
-            databus.makeSubscriber(DatabusExample.Topics.PROCESS_TWO_STATUS, DatabusExample.ProcessTwo.Status.class,
-                    status -> {
-                        publications.add((DatabusExample.ProcessTwo.Status) status);
-                        latch.countDown();
-                        if (latch.getCount() == 0) {
-                            running.set(false);
-                        }
-                    });
             // this databus doesn't know anything about the internals of processTwo
             // All we care about is that It reacts publications that appear to be from ProcessOne
             // Which proves that process is working - This is functional unit test
-            assertTrue(latch.await(10L, java.util.concurrent.TimeUnit.SECONDS));
-            AtomicInteger statusCode = new AtomicInteger(2);
-            publications.forEach(it -> assertEquals(statusCode.getAndIncrement(), it.code()));
+            assertProcessTwoPublishesIncrementingStatuses(databus, running, 2);
         }
+    }
+
+    /**
+     * Subscribe to ProcessTwo's status topic, wait for ten publications, and assert their codes
+     * increment from {@code firstExpectedCode}.
+     *
+     * Shared by the two tests that observe ProcessTwo. They differ only in what drives the
+     * publishing and which code the sequence starts at - the observation itself was duplicated
+     * verbatim, which cpd-check rejects on test sources since 227a73ad. The differing intent of
+     * each test stays at its call site as a comment; only the mechanism lives here.
+     */
+    private void assertProcessTwoPublishesIncrementingStatuses(DatabusExample.Databus databus,
+                                                               AtomicBoolean running,
+                                                               int firstExpectedCode) throws InterruptedException {
+        var latch = new CountDownLatch(10);
+        var publications = new ArrayList<DatabusExample.ProcessTwo.Status>();
+        databus.makeSubscriber(DatabusExample.Topics.PROCESS_TWO_STATUS, DatabusExample.ProcessTwo.Status.class,
+                status -> {
+                    publications.add((DatabusExample.ProcessTwo.Status) status);
+                    latch.countDown();
+                    if (latch.getCount() == 0) {
+                        running.set(false);
+                    }
+                });
+        assertTrue(latch.await(10L, java.util.concurrent.TimeUnit.SECONDS));
+        AtomicInteger statusCode = new AtomicInteger(firstExpectedCode);
+        publications.forEach(it -> assertEquals(statusCode.getAndIncrement(), it.code()));
     }
 
 }
