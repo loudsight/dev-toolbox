@@ -1,3 +1,5 @@
+package com.loudsight.tools.junithelper;
+
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -52,12 +54,8 @@ public class DatabusExample {
 
     }
 
-    static Databus.Topic topicOne = new Databus.Topic() {
-    };
-
-
     static class ProcessOne {
-        int statusCode = 0;
+        int statusCode;
         @FunctionalInterface
         interface Status {
             int code();
@@ -68,7 +66,11 @@ public class DatabusExample {
         }
 
         public void publishStatus() {
-            publisher.publish(() -> statusCode++);
+            publisher.publish(() -> {
+                int code = statusCode;
+                statusCode++;
+                return code;
+            });
         }
 
     }
