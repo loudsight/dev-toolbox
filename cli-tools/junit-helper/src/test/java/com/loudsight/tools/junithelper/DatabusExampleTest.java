@@ -22,7 +22,9 @@ public class DatabusExampleTest {
             AtomicBoolean running = new AtomicBoolean(true);
             new DatabusExample.ProcessTwo(databus);
             DatabusExample.ProcessOne processOne = new DatabusExample.ProcessOne(databus);
-            executorService.submit(() -> {while (running.get()) {processOne.publishStatus();}});
+            // execute, not submit: submit parks any exception thrown by the publish loop in a
+            // Future nobody reads, so a broken publisher shows up only as the latch timing out.
+            executorService.execute(() -> {while (running.get()) {processOne.publishStatus();}});
 
             // this databus doesn't know anything about the internals of processOne and ProcessTwo
             // All we care about is that when the system is started up ProcessTwo publishes an incrementing status
@@ -39,7 +41,6 @@ public class DatabusExampleTest {
         try (var executorService = Executors.newSingleThreadExecutor()) {
             AtomicBoolean running = new AtomicBoolean(true);
             DatabusExample.ProcessOne processOne = new DatabusExample.ProcessOne(databus);
-            executorService.submit(() -> {while (running.get()) {processOne.publishStatus();}});
 
             var latch = new CountDownLatch(10);
             var publications = new ArrayList<DatabusExample.ProcessOne.Status>();
@@ -51,12 +52,18 @@ public class DatabusExampleTest {
                             running.set(false);
                         }
                     });
+            // Subscribe first, then publish: AeronDatabus drops (in fact, NPEs on) publications
+            // made while a topic has no subscriber, so starting the loop earlier means the codes
+            // observed below do not begin at 0.
+            // execute, not submit: see simplePublishSubscribeTest.
+            executorService.execute(() -> {while (running.get()) {processOne.publishStatus();}});
+
             // this databus doesn't know anything about the internals of processOne
             // All we care about is that when the system is started up ProcessOne publishes an incrementing status
             // Which proves that process is working - This is functional unit test
-            // assertTrue(latch.await(10L, java.util.concurrent.TimeUnit.SECONDS));
-            // AtomicInteger statusCode = new AtomicInteger(0);
-            // publications.forEach(it -> assertEquals(statusCode.getAndIncrement(), it.code()));
+            assertTrue(latch.await(10L, java.util.concurrent.TimeUnit.SECONDS));
+            AtomicInteger statusCode = new AtomicInteger(0);
+            publications.forEach(it -> assertEquals(statusCode.getAndIncrement(), it.code()));
         }
     }
 
@@ -69,7 +76,8 @@ public class DatabusExampleTest {
             AtomicBoolean running = new AtomicBoolean(true);
             new DatabusExample.ProcessTwo(databus);
             var processOnePublisher = databus.makePublisher(DatabusExample.Topics.PROCESS_ONE_STATUS, DatabusExample.ProcessOne.Status.class);
-            executorService.submit(() -> {
+            // execute, not submit: see simplePublishSubscribeTest.
+            executorService.execute(() -> {
                 AtomicInteger statusCode = new AtomicInteger(1);
                 while (running.get()) {processOnePublisher.publish((DatabusExample.ProcessOne.Status) statusCode::getAndIncrement);}
             });

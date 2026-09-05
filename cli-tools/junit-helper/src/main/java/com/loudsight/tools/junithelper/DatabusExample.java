@@ -50,7 +50,7 @@ public class DatabusExample {
         }
     }
 
-    abstract class SolaceDatabus implements Databus {
+    abstract static class SolaceDatabus implements Databus {
 
     }
 
