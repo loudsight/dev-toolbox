@@ -34,5 +34,8 @@ RUN ln -fs /usr/bin/python3 /usr/bin/python && \
     echo "$(date)" > /home/created_on.txt
 
 ENV PATH="/home/programs/nvm/versions/node/current/bin/:${PATH}"
+# activate_pyworking() in /opt/myEnv.sh resolves the venv from here (this image builds it at a
+# path its WORK_ROOT/PROGRAMS_ROOT heuristics do not reach).
+ENV LOUDSIGHT_PYVENV=/home/uknown/python/venvs/working
 
 USER uknown
