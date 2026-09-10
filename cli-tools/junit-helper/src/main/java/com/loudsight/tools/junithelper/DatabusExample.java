@@ -36,6 +36,9 @@ public class DatabusExample {
         }
 
         @Override
+        // The per-topic list is stored as Consumer<Object>; dispatch only ever feeds it the
+        // topic's own published values, so widening the handler here is safe.
+        @SuppressWarnings("unchecked")
         public <T> void makeSubscriber(Topic topic, Class<?> publishedType, Consumer<T> handler) {
             subscriberMap.compute(topic, (ignored, existingSubscribers) -> {
                 var subscribers = existingSubscribers;
@@ -76,7 +79,7 @@ public class DatabusExample {
     }
 
 
-    static class ProcessTwo {
+    static final class ProcessTwo {
 
         @FunctionalInterface
         interface Status {
