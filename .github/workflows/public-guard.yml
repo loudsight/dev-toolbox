@@ -1,0 +1,146 @@
+name: public-guard
+
+# The server-side backstop for the pre-commit and pre-push hooks of `syn publish-check-private`, which `git push --no-verify`
+# skips. Installed by `syn publish-install-hooks --ci`; the canonical copy is a resource of syn-plugin-repo, so edit it there.
+#
+# Two limits, stated so nobody over-trusts it:
+#  1. It runs AFTER a push. A direct push of a leak is public before this fails; the job tells you within a minute, and the
+#     remedy is the same as for any leak (rotate, then rewrite history). Only a pull request with this job as a required status
+#     check is blocked before merge. The pre-push hook is the real gate; this is the net under it.
+#  2. It is deliberately self-contained (POSIX sh + awk + betterleaks), because a public repo's CI cannot build the private
+#     syn. Its denylist rules mirror PublishCheckPrivate, but the allowlist is read from the pushed tree, and the secret tripwires
+#     are betterleaks' own. Replace this script with the real command once syn is published (kb/plans/replicate-ai-dev-setup.md, B).
+#
+# The private denylist is the repository secret PRIVATE_DENYLIST (one fixed string per line, the same file as
+# ~/.config/syn/private-denylist.txt). Without it the job fails closed, except on a fork's pull request, which GitHub never
+# gives secrets to: there only the secret scan runs. Findings name the denylist line number, never its text, so the log is safe.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install betterleaks v1.9.0 (pinned, checksum verified)
+        run: |
+          set -eu
+          archive=betterleaks_1.9.0_linux_x64.tar.gz
+          curl -fsSL -o "$RUNNER_TEMP/$archive" "https://github.com/betterleaks/betterleaks/releases/download/v1.9.0/$archive"
+          echo "f8b185a39ffcece2a1ca82bf3a4e7435cd81963ffd16b7a9128daf75f35f6de7  $RUNNER_TEMP/$archive" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/betterleaks"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/betterleaks" betterleaks
+          echo "$RUNNER_TEMP/betterleaks" >> "$GITHUB_PATH"
+
+      - name: Private strings and secrets in the pushed commits
+        env:
+          PRIVATE_DENYLIST: ${{ secrets.PRIVATE_DENYLIST }}
+          IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # BEGIN public-guard
+          set -eu
+          zeros=0000000000000000000000000000000000000000
+          scanner=${SECRET_SCANNER:-betterleaks}
+          head=${HEAD_SHA:?HEAD_SHA is required}
+          if [ -n "${BASE:-}" ]; then
+            range="$BASE..$head"
+          elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "$zeros" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..$head"
+          else
+            # A new ref (before is all zeros): a tag on a commit a branch already has, or a branch cut from one, adds nothing to scan.
+            # Only what no OTHER ref reaches is new, as in the pre-push hook (<sha> --not --remotes); the pushed ref itself is left out of
+            # "the others" (its own remote ref exists by now), so the first push of a branch or of a whole repo still scans everything.
+            case "${GITHUB_REF_TYPE:-}" in
+              tag) others="--exclude=${GITHUB_REF_NAME:?} --tags --remotes" ;;
+              branch) others="--exclude=origin/${GITHUB_REF_NAME:?} --remotes --tags" ;;
+              *) others="" ;;
+            esac
+            range="$head${others:+ --not $others}"
+          fi
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          failed=0
+
+          if [ -n "${PRIVATE_DENYLIST:-}" ]; then
+            printf '%s\n' "$PRIVATE_DENYLIST" > "$work/deny"
+            : > "$work/allow"
+            [ -f .public-allowlist ] && cp .public-allowlist "$work/allow"
+            for sha in $(git rev-list --reverse $range); do
+              short=$(printf '%.8s' "$sha")
+              git -c core.quotepath=off log -1 --format='%an%n%ae%n%cn%n%ce%n%B' "$sha" |
+                awk -v w="commit $short message/identity" '{ print w "\t" $0 }'
+              git -c core.quotepath=off diff-tree --root -r --no-commit-id --name-only "$sha" |
+                awk -v w="commit $short file name" '{ print w "\t" $0 }'
+              git -c core.quotepath=off show --format= --unified=0 --no-color --no-ext-diff --no-renames "$sha" |
+                awk -v w="commit $short" '
+                  /^diff --(git|cc) / { header = 1; file = "?"; next }
+                  header && /^\+\+\+ / { file = substr($0, 5); sub(/^b\//, "", file); next }
+                  /^@@/ { header = 0; ln = 0; if (match($0, /\+[0-9]+/)) ln = substr($0, RSTART + 1, RLENGTH - 1) + 0; next }
+                  !header && /^\+/ { print w " " file ":" ln "\t" substr($0, 2); ln++ }'
+            done > "$work/items"
+            awk -v deny="$work/deny" -v allow="$work/allow" '
+              function trim(s) { gsub(/^[ \t\r]+|[ \t\r]+$/, "", s); return s }
+              BEGIN {
+                while ((getline line < deny) > 0) {
+                  dline++
+                  t = trim(line)
+                  if (t == "" || substr(t, 1, 1) == "#") continue
+                  nt++; term[nt] = tolower(t); num[nt] = dline
+                }
+                while ((getline line < allow) > 0) {
+                  t = trim(line)
+                  if (t == "" || substr(t, 1, 1) == "#") continue
+                  na++; ok[na] = tolower(t)
+                }
+                for (i = 1; i <= na; i++)
+                  for (j = i + 1; j <= na; j++)
+                    if (length(ok[j]) > length(ok[i])) { s = ok[i]; ok[i] = ok[j]; ok[j] = s }
+                if (nt == 0) { print "FAIL the denylist has no entries; refusing to pass an empty list"; bad = 1 }
+              }
+              {
+                p = index($0, "\t")
+                where = substr($0, 1, p - 1)
+                text = tolower(substr($0, p + 1))
+                for (i = 1; i <= na; i++)
+                  while ((k = index(text, ok[i])) > 0) text = substr(text, 1, k - 1) "\001" substr(text, k + length(ok[i]))
+                for (i = 1; i <= nt; i++)
+                  if (index(text, term[i]) > 0 && !((where SUBSEP num[i]) in seen)) {
+                    seen[where SUBSEP num[i]] = 1
+                    print "FAIL " where " - denylist entry on line " num[i]
+                    bad = 1
+                  }
+              }
+              END { exit bad }' "$work/items" || failed=1
+            [ "$failed" = 0 ] && echo "ok   no denylist entry in $(wc -l < "$work/items" | tr -d ' ') pieces of text"
+          elif [ "${IS_FORK_PR:-}" = "true" ]; then
+            echo "skip a fork's pull request gets no secrets, so the denylist check cannot run; the secret scan still does"
+          else
+            echo "::error::the PRIVATE_DENYLIST secret is not set, so the private-string check cannot run; refusing to pass"
+            failed=1
+          fi
+
+          if command -v "$scanner" >/dev/null 2>&1; then
+            if "$scanner" git . --log-opts "$range" --no-banner --no-color --redact; then
+              echo "ok   $scanner found no secrets in $range"
+            else
+              echo "FAIL $scanner found secrets (redacted report above)"
+              failed=1
+            fi
+          else
+            echo "::error::$scanner is not installed, so the secret scan cannot run; refusing to pass"
+            failed=1
+          fi
+          exit "$failed"
+          # END public-guard

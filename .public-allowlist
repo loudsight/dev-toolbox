@@ -1,0 +1,6 @@
+# Substrings this public repo may contain although they match the owner's private denylist.
+# Each is blanked out of a line before the denylist is applied, so list only what is meant to be public.
+# The Maven Central developer contact and project URL, required in every published POM.
+spam@loudsight.com
+https://loudsight.com
+https://www.loudsight.com

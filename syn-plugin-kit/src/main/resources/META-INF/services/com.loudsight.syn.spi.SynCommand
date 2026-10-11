@@ -1,0 +1,9 @@
+com.loudsight.syn.plugin.kit.KbCheckLinks
+com.loudsight.syn.plugin.kit.ScriptCreateScaffold
+com.loudsight.syn.plugin.kit.ScriptListCatalog
+com.loudsight.syn.plugin.kit.ScriptCheckConventions
+com.loudsight.syn.plugin.kit.ScriptCheckCeiling
+com.loudsight.syn.plugin.kit.PublishCheckPrivate
+com.loudsight.syn.plugin.kit.PublishInstallHooks
+com.loudsight.syn.plugin.kit.SessionListOpen
+com.loudsight.syn.plugin.kit.SessionInspectTranscript

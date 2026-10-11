@@ -1,0 +1,14 @@
+#!/bin/sh
+#
+# Public-repo guard, pre-push: refuse a push whose commits carry a private string or a secret, in any commit of the
+# range (messages, identities and file names included), and require a real secret scanner. Git passes the refs on stdin,
+# which exec hands straight to syn. Written by `syn publish-install-hooks`; see pre-commit beside this file.
+here=$(cd "$(dirname "$0")" && pwd)
+syn=${SYN:-}
+for candidate in @LAUNCHER@; do
+    [ -n "$syn" ] && break
+    [ -x "$candidate" ] && syn=$candidate
+done
+[ -n "$syn" ] || syn=$(command -v syn 2>/dev/null || true)
+[ -n "$syn" ] || { echo "public guard: syn not found; refusing the push (set SYN=/path/to/syn)" >&2; exit 1; }
+exec "$syn" publish-check-private --push-stdin --require-scanner --repo "$(git rev-parse --show-toplevel)"

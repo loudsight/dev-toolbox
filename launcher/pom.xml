@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The syn launcher: Maven resolves syn and its plugins from Maven Central into .syn-cache, and `syn` (copied from syn.tmpl) runs it.
+  Nothing here is built into your product. Edit the plugin list below to add your own commands; see README.md.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>example</groupId>
+    <artifactId>syn-launcher</artifactId>
+    <version>1</version>
+    <packaging>pom</packaging>
+    <name>syn launcher</name>
+
+    <properties>
+        <!-- One version for the head and the kit: they are released together. -->
+        <syn.version>0.0.1</syn.version>
+        <!-- Where the head's jars (lib) and the plugins (plugins/NAME/current/libs) are laid out; the syn script sets it. -->
+        <syn.home>${project.basedir}/.syn-cache</syn.home>
+    </properties>
+
+    <dependencies>
+        <!-- The head: loads plugins, enforces tiers, runs commands. -->
+        <dependency>
+            <groupId>com.loudsight</groupId>
+            <artifactId>syn-cli</artifactId>
+            <version>${syn.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.9.0</version>
+                <executions>
+                    <execution>
+                        <id>syn-head</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <includeScope>runtime</includeScope>
+                            <outputDirectory>${syn.home}/lib</outputDirectory>
+                        </configuration>
+                    </execution>
+                    <!-- The generic commands. Each plugin is one execution like this one, laid out as plugins/NAME/current/libs. -->
+                    <execution>
+                        <id>syn-plugin-kit</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>com.loudsight</groupId>
+                                    <artifactId>syn-plugin-kit</artifactId>
+                                    <version>${syn.version}</version>
+                                </artifactItem>
+                            </artifactItems>
+                            <outputDirectory>${syn.home}/plugins/syn-plugin-kit/current/libs</outputDirectory>
+                        </configuration>
+                    </execution>
+                    <!-- Your own commands, for example:
+                    <execution>
+                        <id>my-commands</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>com.example</groupId>
+                                    <artifactId>my-commands</artifactId>
+                                    <version>1.0.0</version>
+                                </artifactItem>
+                            </artifactItems>
+                            <outputDirectory>${syn.home}/plugins/my-commands/current/libs</outputDirectory>
+                        </configuration>
+                    </execution>
+                    -->
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

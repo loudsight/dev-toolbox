@@ -1,0 +1,9 @@
+com.loudsight.syn.cli.FakeCommands$Echo
+com.loudsight.syn.cli.FakeCommands$Remote
+com.loudsight.syn.cli.FakeCommands$Irreversible
+com.loudsight.syn.cli.FakeCommands$Boom
+com.loudsight.syn.cli.FakeCommands$Exit
+com.loudsight.syn.cli.FakeCommands$Listing
+com.loudsight.syn.cli.FakeCommands$Local
+com.loudsight.syn.cli.FakeCommands$Refuses
+com.loudsight.syn.cli.FakeCommands$Preview
