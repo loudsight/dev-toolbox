@@ -12,4 +12,10 @@ if [ ! -d "$cache/lib" ]; then
 fi
 REPO_ROOT=${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
 export REPO_ROOT
-exec java -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 -Dsyn.plugins.dir="$cache/plugins" -cp "$cache/lib/*" com.loudsight.syn.cli.Syn "$@"
+# git bash converts a POSIX-looking argument to a Windows path for java.exe, except one that contains a wildcard, so the classpath
+# below would reach java as /c/... and match no jar. Give java the drive-letter form there (MSYS_NO_PATHCONV does not help).
+case $(uname -s) in
+    MINGW*|MSYS*|CYGWIN*) classpath="$(cygpath -m "$cache")/lib/*" ;;
+    *) classpath="$cache/lib/*" ;;
+esac
+exec java -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 -Dsyn.plugins.dir="$cache/plugins" -cp "$classpath" com.loudsight.syn.cli.Syn "$@"
