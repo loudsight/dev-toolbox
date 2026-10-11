@@ -8,7 +8,8 @@ name. This directory is all a repository needs to use it. Nothing here becomes p
 1. Copy `pom.xml` and `syn.tmpl` into your repository (anywhere; a `tools/syn/` directory works), and save `syn.tmpl` as `syn`
    with `chmod +x`. Ignore `.syn-cache/` in git.
 2. Run `./syn catalog`. The first run has Maven fetch syn and `syn-plugin-kit` (the generic commands) from Maven Central into
-   `.syn-cache/`. Delete `.syn-cache/` to update.
+   `.syn-cache/`, failing if a downloaded file does not match Central's published SHA-1 (`--strict-checksums`; Maven only warns by
+   default). Delete `.syn-cache/` to update.
 3. Settings live in `.syn/config.properties` at your repository root (committed, so changes are reviewed). Every key has a
    default, so the file can be empty or absent. The keys by command are in each command's class comment in `syn-plugin-kit`:
    `kb.*` (`kb-check-links`), `scaffold.*` (`script-create-scaffold`), `catalog.*` (`script-list-catalog`), `conventions.*`
