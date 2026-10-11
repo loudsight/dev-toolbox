@@ -18,6 +18,8 @@ name. This directory is all a repository needs to use it. Nothing here becomes p
 
 ## Your own commands
 
+The full contract, with a tested example: [`docs/PLUGIN_SPI.md`](../docs/PLUGIN_SPI.md).
+
 A command is a class implementing `com.loudsight.syn.spi.SynCommand` (from `syn-spi`), registered in
 `META-INF/services/com.loudsight.syn.spi.SynCommand`. `syn script-create-scaffold NAME --plugin P` writes one, with the
 conventions `syn script-check-conventions` enforces. Publish the jar (or `mvn install` it) and add an `<execution>` for it to
