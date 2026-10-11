@@ -1,13 +1,14 @@
 #!/bin/sh
 #
 # The syn launcher: copy this file next to pom.xml as `syn` and make it executable. The first run asks Maven to lay syn out in
-# .syn-cache (delete that directory to update or to pick up a new plugin). SYN_MAVEN_ARGS adds Maven arguments, e.g. -o.
+# .syn-cache (delete that directory to update or to pick up a new plugin). Maven only warns on a bad checksum by default; this
+# fails the download instead. SYN_MAVEN_ARGS adds Maven arguments, e.g. -o.
 dir=$(cd "$(dirname "$0")" && pwd)
 cache=$dir/.syn-cache
 if [ ! -d "$cache/lib" ]; then
     echo "syn: setting up $cache" >&2
     # shellcheck disable=SC2086
-    mvn -q -f "$dir/pom.xml" package -Dsyn.home="$cache" $SYN_MAVEN_ARGS >&2 || exit 1
+    mvn -q --strict-checksums -f "$dir/pom.xml" package -Dsyn.home="$cache" $SYN_MAVEN_ARGS >&2 || exit 1
 fi
 REPO_ROOT=${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
 export REPO_ROOT

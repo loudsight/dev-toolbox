@@ -6,7 +6,7 @@ one; `syn <command> --help` explains it.
 
 | Module | What it is |
 |---|---|
-| `syn-spi` | The interface a command implements (`SynCommand`), and the types it is handed. Write your own commands against this. |
+| `syn-spi` | The interface a command implements (`SynCommand`), and the types it is handed. Write your own commands against this: [`docs/PLUGIN_SPI.md`](docs/PLUGIN_SPI.md). |
 | `syn-core` | Helpers commands share: running processes, reading settings (`.syn/config.properties`), output, locks. |
 | `syn-cli` | The head: finds commands, enforces each command's tier, runs one. |
 | `syn-plugin-kit` | The generic commands: dead-link check for a knowledge base, a command scaffold, convention and shell-ceiling checks, a script catalog, a guard that keeps private strings and secrets out of public repositories, and tools over local Claude Code sessions. |
