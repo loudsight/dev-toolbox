@@ -6,10 +6,10 @@
     <parent>
         <groupId>com.loudsight</groupId>
         <artifactId>dev-toolbox</artifactId>
-        <version>0.0.2-SNAPSHOT</version>
+        <version>0.0.2</version>
     </parent>
 
-    <version>0.0.2-SNAPSHOT</version>
+    <version>0.0.2</version>
 
     <artifactId>syn-spi</artifactId>
     <name>Loudsight syn SPI</name>
