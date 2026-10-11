@@ -9,7 +9,7 @@
 
     <groupId>example</groupId>
     <artifactId>syn-launcher</artifactId>
-    <version>1</version>
+    <version>1.0.0</version>
     <packaging>pom</packaging>
     <name>syn launcher</name>
 
