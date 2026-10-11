@@ -34,7 +34,11 @@ public final class HostPrep {
     echo '   already on master through another commit, then re-run.'
     exit 1
   fi
-  git pull origin master -q
+  # --no-recurse-submodules: a plain pull also fetches every submodule pointer on the way, by hash. A public
+  # submodule whose history was rewritten has orphaned pointers in the superproject's past, the remote refuses each
+  # ("not our ref"), and the deploy dies here, before it starts (2026-10-11). Only the pointer the pull lands on is
+  # needed, and 'git submodule update' below fetches exactly that.
+  git pull --no-recurse-submodules origin master -q
   git submodule sync --recursive 2>/dev/null || true
   git submodule update --init --recursive
 """;

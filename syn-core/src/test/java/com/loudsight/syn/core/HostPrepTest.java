@@ -79,6 +79,74 @@ class HostPrepTest {
         assertTrue(result.stdout().contains("Pulling latest code"), result.stdout());
     }
 
+    /** git with the file transport allowed: a submodule whose remote is a local path is otherwise refused. */
+    private static void gitFile(Path dir, String... args) {
+        String[] withFile = new String[args.length + 2];
+        withFile[0] = "-c";
+        withFile[1] = "protocol.file.allow=always";
+        System.arraycopy(args, 0, withFile, 2, args.length);
+        git(dir, withFile);
+    }
+
+    /**
+     * The failure that stopped the 2026-10-11 staging deploy: a public submodule's history was replaced, so the
+     * pointers the superproject recorded on the way to its current one no longer exist on the submodule's remote.
+     * A plain {@code git pull} fetches submodules for every commit it brings in, asks for each of those pointers
+     * by hash, and dies with "not our ref" before the deploy starts. Only the pointer the superproject lands on needs
+     * to be fetched, and {@code git submodule update} asks for exactly that.
+     */
+    @Test
+    void aPullSucceedsWhenSubmodulePointersOnTheWayWereOrphanedByAHistoryRewrite() throws IOException {
+        Path libOrigin = Files.createDirectory(temp.resolve("lib-origin.git"));
+        git(libOrigin, "init", "--bare", "-q", "--initial-branch=master");
+        Path lib = Files.createDirectory(temp.resolve("lib"));
+        git(lib, "init", "-q", "--initial-branch=master");
+        Files.writeString(lib.resolve("l.txt"), "lib one\n");
+        git(lib, "add", "l.txt");
+        git(lib, "commit", "-q", "-m", "lib one");
+        git(lib, "remote", "add", "origin", libOrigin.toString());
+        git(lib, "push", "-q", "origin", "HEAD:master");
+
+        // The superproject adopts the submodule, and the host catches up to it: the state a host that is only a little
+        // behind is in.
+        gitFile(pusher, "submodule", "add", "-q", libOrigin.toString(), "lib");
+        git(pusher, "commit", "-q", "-m", "add lib");
+        git(pusher, "push", "-q", "origin", "HEAD:master");
+        gitFile(host, "pull", "-q", "origin", "master");
+        gitFile(host, "submodule", "update", "--init");
+
+        // A pointer the superproject passes through: lib moves on, and the superproject records it.
+        Files.writeString(lib.resolve("l.txt"), "lib two\n");
+        git(lib, "commit", "-q", "-am", "lib two");
+        git(lib, "push", "-q", "origin", "HEAD:master");
+        gitFile(pusher.resolve("lib"), "fetch", "-q", "origin");
+        git(pusher.resolve("lib"), "checkout", "-q", "FETCH_HEAD");
+        git(pusher, "commit", "-q", "-am", "lib pointer: two");
+        git(pusher, "push", "-q", "origin", "HEAD:master");
+
+        // lib's history is then replaced by a fresh root and the old commits are gone from its remote.
+        git(lib, "checkout", "-q", "--orphan", "fresh");
+        git(lib, "commit", "-q", "-m", "lib fresh snapshot");
+        git(lib, "push", "-q", "-f", "origin", "HEAD:master");
+        git(libOrigin, "reflog", "expire", "--expire=now", "--all");
+        git(libOrigin, "gc", "-q", "--prune=now");
+
+        // ...and the superproject lands on a pointer that does exist.
+        gitFile(pusher.resolve("lib"), "fetch", "-q", "origin");
+        git(pusher.resolve("lib"), "checkout", "-q", "FETCH_HEAD");
+        git(pusher, "commit", "-q", "-am", "lib pointer: fresh");
+        git(pusher, "push", "-q", "origin", "HEAD:master");
+
+        String script = "set -e\ncd '" + host + "'\n"
+                + "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=protocol.file.allow GIT_CONFIG_VALUE_0=always\n"
+                + HostPrep.sync().replace("/opt/.deploy-run.lock", lock.toString());
+        Cmd.Result result = Cmd.of("bash", "-c", script).mergeErr().capture();
+
+        assertTrue(result.ok(), result.stdout());
+        assertEquals(head(pusher), head(host), "the superproject is at origin's commit");
+        assertEquals(head(lib), head(host.resolve("lib")), "and the submodule is at the pointer it landed on");
+    }
+
     @Test
     void aHandEditedTrackedFileRefusesThePullNamesTheFileAndPullsNothing() throws IOException {
         pushSecondCommit();
