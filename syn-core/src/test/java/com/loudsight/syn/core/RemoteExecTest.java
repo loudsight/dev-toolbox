@@ -50,7 +50,7 @@ class RemoteExecTest {
         int strict = script.indexOf("set -e");
         int enter = script.indexOf("cd /opt/code/synergistically");
         int lock = script.indexOf("flock -n 9");
-        int pull = script.indexOf("git pull origin master");
+        int pull = script.indexOf("git pull --no-recurse-submodules origin master");
         int syn = script.indexOf("scripts/syn build-run-modules --dry-run");
         assertTrue(env >= 0 && env < strict && strict < enter && enter < lock && lock < pull && pull < syn, script);
         assertTrue(script.endsWith("scripts/syn build-run-modules --dry-run\n"), script);
