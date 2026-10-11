@@ -15,7 +15,7 @@
 
     <properties>
         <!-- One version for the head and the kit: they are released together. -->
-        <syn.version>0.0.1</syn.version>
+        <syn.version>0.0.2</syn.version>
         <!-- Where the head's jars (lib) and the plugins (plugins/NAME/current/libs) are laid out; the syn script sets it. -->
         <syn.home>${project.basedir}/.syn-cache</syn.home>
     </properties>
