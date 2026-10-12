@@ -38,7 +38,7 @@ jobs:
 
       - name: Install syn from Maven Central (pinned, checksums verified)
         env:
-          SYN_VERSION: '0.0.3'
+          SYN_VERSION: '0.0.2'
         run: |
           set -eu
           home="$RUNNER_TEMP/syn"
