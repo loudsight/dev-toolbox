@@ -22,9 +22,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The CI workflow cannot use the Java command (a public repo's CI cannot build the private syn), so its script is a second
- * implementation of the same rules. These tests run that script, extracted from the installed resource, against real throwaway
- * repos, and check it against {@link PublishCheckPrivate} on the same repos, so the two cannot drift apart unnoticed.
+ * The CI workflow fetches syn from Maven Central and runs {@code publish-check-private}; what it adds is the shell around that
+ * call: which commits to look at, the fail-closed handling of a missing secret, and the fork exception. These tests run that
+ * script, extracted from the installed resource, against real throwaway repos with {@link StubSyn} standing in for the installed
+ * {@code syn}. (Until syn reached Central the script was a second implementation of the rules and a test held the two together.)
  */
 class PublicGuardWorkflowTest {
 
@@ -34,10 +35,17 @@ class PublicGuardWorkflowTest {
     private static final Pattern DENYLIST_LINE = Pattern.compile("denylist entry on line (\\d+)");
 
     private static String script;
+    private static String stubBin;
 
     @BeforeAll
     static void extractTheScript() throws IOException {
-        assumeTrue(Cmd.of("sh", "-c", "command -v git && command -v awk").discardErr().capture().ok(), "git and awk are needed");
+        assumeTrue(Cmd.of("sh", "-c", "command -v git && command -v java").discardErr().capture().ok(), "git and java are needed");
+        Path bin = Files.createTempDirectory("stub-syn-bin");
+        Path syn = bin.resolve("syn");
+        Files.writeString(syn, "#!/bin/sh\nexec java -cp '" + System.getProperty("java.class.path")
+                + "' com.loudsight.syn.plugin.kit.StubSyn \"$@\"\n", StandardCharsets.UTF_8);
+        Files.setPosixFilePermissions(syn, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+        stubBin = bin.toString();
         script = PublishInstallHooks.workflow().lines()
                 .dropWhile(line -> !line.contains("# BEGIN public-guard"))
                 .skip(1)
@@ -57,7 +65,7 @@ class PublicGuardWorkflowTest {
         Run run = guard(repo, TERM);
 
         assertEquals(0, run.exit(), run.output());
-        assertTrue(run.output().contains("no denylist entry"), run.output());
+        assertTrue(run.output().contains("no private string or secret tripwire"), run.output());
     }
 
     @Test
@@ -193,7 +201,7 @@ class PublicGuardWorkflowTest {
 
         assertEquals(1, found.exit(), found.output());
         assertEquals(1, missing.exit(), missing.output());
-        assertTrue(missing.output().contains("is not installed"), missing.output());
+        assertTrue(missing.output().contains("could not be run"), missing.output());
     }
 
     // ---- which commits are looked at
@@ -316,29 +324,9 @@ class PublicGuardWorkflowTest {
     // ---- the same verdict as the Java command
 
     @Test
-    void theScriptAndTheJavaCommandAgreeOnTheSameRepos(@TempDir Path root) throws Exception {
-        String[][] scenarios = {
-                {"clean", "clean\n", "tidy", AUTHOR},
-                {"content", "host " + TERM + "\n", "tidy", AUTHOR},
-                {"message", "clean\n", "see " + TERM, AUTHOR},
-                {"identity", "clean\n", "tidy", "Dev <dev@" + TERM + ">"},
-        };
-        for (String[] scenario : scenarios) {
-            Path repo = root.resolve(scenario[0]);
-            repo(repo);
-            Fixtures.write(repo.resolve(".public-repo"), "");
-            commit(repo, "a.txt", scenario[1], scenario[2], scenario[3]);
-            Path deny = root.resolve(scenario[0] + "-denylist.txt");
-            Files.writeString(deny, "# private\n" + TERM + "\n", StandardCharsets.UTF_8);
-
-            Run script = guard(repo, "# private\n" + TERM + "\n");
-            Result java = Fixtures.run(new PublishCheckPrivate(), repo, "--range", "HEAD", "--repo", repo.toString(),
-                    "--denylist", deny.toString(), "--scanner", "none");
-
-            assertEquals(java.exit() == ExitCodes.OK ? 0 : 1, script.exit(),
-                    scenario[0] + ": the script said " + script.output() + " but the Java command said " + java.stdout());
-            assertEquals(denylistLines(java.stdout()), denylistLines(script.output()), scenario[0] + ": same denylist lines");
-        }
+    void theScriptCallsTheCommandAndKeepsNoSecondImplementationOfTheRules() {
+        assertTrue(script.contains("syn publish-check-private"), script);
+        assertFalse(script.contains("awk"), "the denylist rules live in PublishCheckPrivate only");
     }
 
     // ---- helpers
@@ -348,7 +336,8 @@ class PublicGuardWorkflowTest {
 
     private static Run guard(Path repo, @Nullable String denylist, String... extraEnv) {
         Cmd cmd = Cmd.of("sh", "-c", script).dir(repo).mergeErr()
-                .env("HEAD_SHA", head(repo)).env("SECRET_SCANNER", "true");
+                .env("HEAD_SHA", head(repo)).env("SECRET_SCANNER", "true")
+                .env("PATH", stubBin + java.io.File.pathSeparator + System.getenv("PATH"));
         if (denylist != null) {
             cmd = cmd.env("PRIVATE_DENYLIST", denylist.endsWith("\n") ? denylist : denylist + "\n");
         }
