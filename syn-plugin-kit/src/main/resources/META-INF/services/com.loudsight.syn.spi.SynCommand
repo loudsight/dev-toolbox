@@ -7,3 +7,5 @@ com.loudsight.syn.plugin.kit.PublishCheckPrivate
 com.loudsight.syn.plugin.kit.PublishInstallHooks
 com.loudsight.syn.plugin.kit.SessionListOpen
 com.loudsight.syn.plugin.kit.SessionInspectTranscript
+com.loudsight.syn.plugin.kit.PublishCheckWorkingHours
+com.loudsight.syn.plugin.kit.PublishEditHolidays

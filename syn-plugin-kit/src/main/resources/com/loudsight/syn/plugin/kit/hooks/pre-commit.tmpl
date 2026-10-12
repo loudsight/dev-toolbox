@@ -1,6 +1,7 @@
 #!/bin/sh
 #
-# Public-repo guard, pre-commit: refuse a commit that carries a private string or a secret.
+# Public-repo guard, pre-commit: refuse a commit on a weekday during working hours (SYN_WORKHOURS_OVERRIDE=1 lets one through),
+# and one that carries a private string or a secret.
 # Written by `syn publish-install-hooks` and rewritten on every run: change the kit's template, not this file.
 # A repo without a .public-repo marker is skipped, so this is safe to leave installed. Bypass: --no-verify, which CI does not honour.
 here=$(cd "$(dirname "$0")" && pwd)
@@ -11,4 +12,6 @@ for candidate in @LAUNCHER@; do
 done
 [ -n "$syn" ] || syn=$(command -v syn 2>/dev/null || true)
 [ -n "$syn" ] || { echo "public guard: syn not found; refusing the commit (set SYN=/path/to/syn)" >&2; exit 1; }
-exec "$syn" publish-check-private --staged --repo "$(git rev-parse --show-toplevel)"
+root=$(git rev-parse --show-toplevel)
+"$syn" publish-check-working-hours --repo "$root" || exit 1
+exec "$syn" publish-check-private --staged --repo "$root"

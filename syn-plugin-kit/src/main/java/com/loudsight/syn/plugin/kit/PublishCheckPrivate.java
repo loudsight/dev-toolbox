@@ -107,7 +107,7 @@ public final class PublishCheckPrivate implements SynCommand {
             context.out().errorln("give exactly one of --staged, --range, --push-stdin, --path");
             return ExitCodes.USAGE;
         }
-        Path repoDir = path != null ? path.toAbsolutePath() : resolveRepo(context);
+        Path repoDir = path != null ? path.toAbsolutePath() : RepoDir.resolve(repo, context);
         if (path == null && !strict && !Files.exists(repoDir.resolve(MARKER))) {
             checks.skip(repoDir + " has no " + MARKER + " marker: not a public repo, nothing to check");
             return ExitCodes.OK;
@@ -162,14 +162,6 @@ public final class PublishCheckPrivate implements SynCommand {
         if (findings.size() > MAX_REPORTED) {
             checks.detail("... and " + (findings.size() - MAX_REPORTED) + " more");
         }
-    }
-
-    private Path resolveRepo(Context context) {
-        if (repo != null) {
-            return repo.toAbsolutePath();
-        }
-        Cmd.Result top = Cmd.of("git", "rev-parse", "--show-toplevel").dir(Path.of("").toAbsolutePath()).discardErr().capture();
-        return top.ok() && !top.stdout().isBlank() ? Path.of(top.stdout().strip()) : context.repoRoot();
     }
 
     private static Path defaultDenylist() {
