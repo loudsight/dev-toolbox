@@ -19,6 +19,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 /**
@@ -194,19 +196,32 @@ final class SelfUpdate {
     }
 
     private static void mavenOrFail(Config config, List<String> goals) {
-        // Offline first, online as the fallback: the same order scripts/syn uses.
-        if (maven(config.repoRoot(), true, goals) != 0 && maven(config.repoRoot(), false, goals) != 0) {
-            throw new IllegalStateException("Maven failed (" + String.join(" ", goals) + "): see its output above");
-        }
+        mavenOrFail(goals, offline -> maven(config.repoRoot(), offline, goals), System.err::print);
     }
 
-    private static int maven(Path repoRoot, boolean offline, List<String> goals) {
+    /**
+     * Offline first, online as the fallback (the order scripts/syn uses). Maven's output is held back: a success
+     * logs one INFO line, a failure hands the full output of both attempts to {@code onFailure} and throws.
+     */
+    static void mavenOrFail(List<String> goals, Function<Boolean, Cmd.Result> run, Consumer<String> onFailure) {
+        Cmd.Result offline = run.apply(true);
+        if (!offline.ok()) {
+            Cmd.Result online = run.apply(false);
+            if (!online.ok()) {
+                onFailure.accept(offline.stdout() + online.stdout());
+                throw new IllegalStateException("Maven failed (" + String.join(" ", goals) + "): output printed above");
+            }
+        }
+        LOGGER.logInfo("syn rebuilt ({})", String.join(" ", goals));
+    }
+
+    private static Cmd.Result maven(Path repoRoot, boolean offline, List<String> goals) {
         List<String> command = new ArrayList<>(List.of("mvn"));
         if (offline) {
             command.add("-o");
         }
         command.addAll(goals);
-        return Cmd.of(command).dir(repoRoot).stream();
+        return Cmd.of(command).dir(repoRoot).mergeErr().capture();
     }
 
     /**
