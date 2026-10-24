@@ -119,7 +119,7 @@ class SyncCheckTest {
                 aaaaaaaaaaaaaaaa
                 @@DIRTY
                  M kb
-                 M kb/plans/x.md
+                 M kb/README.md
                 @@SUBMODULES
                  1111111111 kb (heads/master)
                 """);

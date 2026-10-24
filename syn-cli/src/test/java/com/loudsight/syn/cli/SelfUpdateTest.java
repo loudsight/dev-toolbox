@@ -2,6 +2,7 @@ package com.loudsight.syn.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.loudsight.syn.cli.SelfUpdate.State;
@@ -134,5 +135,29 @@ class SelfUpdateTest {
         System.setProperty(SelfUpdate.CACHE_PROPERTY, repo.resolve("c").toString());
 
         assertEquals(repo.resolve("c/plugins"), Syn.pluginsDir(repo));
+    }
+
+    @Test
+    void aSuccessfulMavenRunPrintsNoMavenOutput() {
+        List<String> printed = new java.util.ArrayList<>();
+        List<Boolean> attempts = new java.util.ArrayList<>();
+
+        SelfUpdate.mavenOrFail(List.of("package"), offline -> {
+            attempts.add(offline);
+            return new com.loudsight.scriptkit.Cmd.Result(0, "[INFO] noisy maven output");
+        }, printed::add);
+
+        assertEquals(List.of(true), attempts);
+        assertTrue(printed.isEmpty(), printed.toString());
+    }
+
+    @Test
+    void aFailedMavenRunPrintsBothAttemptsInFullAndThrows() {
+        List<String> printed = new java.util.ArrayList<>();
+
+        assertThrows(IllegalStateException.class, () -> SelfUpdate.mavenOrFail(List.of("package"),
+                offline -> new com.loudsight.scriptkit.Cmd.Result(1, offline ? "OFFLINE-FAIL;" : "ONLINE-FAIL;"), printed::add));
+
+        assertEquals(List.of("OFFLINE-FAIL;ONLINE-FAIL;"), printed);
     }
 }
