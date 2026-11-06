@@ -10,7 +10,7 @@
         <relativePath />
     </parent>
 
-    <version>0.0.3</version>
+    <version>0.0.4-SNAPSHOT</version>
     <artifactId>dev-toolbox</artifactId>
     <packaging>pom</packaging>
     <name>Loudsight dev-toolbox</name>
