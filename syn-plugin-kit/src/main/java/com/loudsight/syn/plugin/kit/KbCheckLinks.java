@@ -7,14 +7,19 @@ import com.loudsight.syn.spi.ExitCodes;
 import com.loudsight.syn.spi.SynCommand;
 import com.loudsight.syn.spi.Tier;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import com.loudsight.syn.spi.Output;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
@@ -51,6 +56,8 @@ public final class KbCheckLinks implements SynCommand {
     private static final List<String> DEFAULT_SUBDIRS = List.of("plans", "issues", "recipes", "architecture", "decisions", "skills", "reports");
     private static final Pattern LEADING_NON_LETTERS = Pattern.compile("^[^A-Za-z]*");
     private static final int MAX_SHOWN = 70;
+    /** A markdown link: {@code ](target)}. */
+    static final Pattern MARKDOWN_LINK = Pattern.compile("\\]\\([^)]+\\)");
 
     @Option(names = "--quiet", description = "Leave out the advice on fixing")
     private boolean quiet;
@@ -94,6 +101,43 @@ public final class KbCheckLinks implements SynCommand {
                     .map(Hit::parse).toList();
         }
 
+        /**
+         * Markdown links ({@code ](target)}) in the {@code *.md} files under {@code where}, found in-process: an external
+         * grep loses the backslashes of the pattern between Java and grep.exe on Windows. Like {@code grep -r}, files that are
+         * symlinks are skipped (their target is scanned at its own location).
+         */
+        List<Hit> markdownLinks(String where) {
+            Path start = root.resolve(where);
+            List<Hit> hits = new ArrayList<>();
+            if (!Files.isDirectory(start)) {
+                return hits;
+            }
+            try (Stream<Path> files = Files.walk(start.toRealPath())) {
+                Path realStart = start.toRealPath();
+                for (Path file : files.filter(f -> f.toString().endsWith(".md") && Files.isRegularFile(f, LinkOption.NOFOLLOW_LINKS)).sorted().toList()) {
+                    String name = where + "/" + realStart.relativize(file).toString().replace('\\', '/');
+                    List<String> lines;
+                    try {
+                        lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                    } catch (IOException | UncheckedIOException ignoredUnreadable) {
+                        continue; // as grep -s
+                    }
+                    for (int i = 0; i < lines.size(); i++) {
+                        Matcher matcher = MARKDOWN_LINK.matcher(lines.get(i));
+                        while (matcher.find()) {
+                            Hit hit = new Hit(name, Integer.toString(i + 1), matcher.group());
+                            if (!excludes.matcher(hit.file() + ":" + hit.line() + ":" + hit.match()).find()) {
+                                hits.add(hit);
+                            }
+                        }
+                    }
+                }
+            } catch (IOException ignoredUnwalkable) {
+                return hits; // an unreadable tree has no (more) links to report, as with grep -s
+            }
+            return hits;
+        }
+
         void reportMatch(Hit hit) {
             String what = LEADING_NON_LETTERS.matcher(hit.match()).replaceFirst("");
             report(hit.file() + ":" + hit.line(),
@@ -133,7 +177,7 @@ public final class KbCheckLinks implements SynCommand {
         }
 
         out.println("== " + dir + "/ paths that do not resolve ==");
-        for (Hit hit : run.grep("(^|[^A-Za-z0-9_./-])" + dirPattern + "/[A-Za-z0-9._/-]+\\.(md|txt)", INCLUDES, ".")) {
+        for (Hit hit : run.grep("(^|[^A-Za-z0-9_./-])" + dirPattern + "/[A-Za-z0-9._/-]+[.](md|txt)", INCLUDES, ".")) {
             String target = dir + "/" + hit.match().substring(hit.match().indexOf(dir + "/") + dir.length() + 1);
             if (!Files.exists(root.resolve(target))) {
                 run.report(hit.file() + ":" + hit.line(), target);
@@ -142,7 +186,7 @@ public final class KbCheckLinks implements SynCommand {
 
         out.println("");
         out.println("== Relative links inside " + dir + " documents that do not resolve ==");
-        for (Hit hit : run.grep("\\]\\([^)]+\\)", List.of("--include=*.md"), dir)) {
+        for (Hit hit : run.markdownLinks(dir)) {
             String link = linkTarget(hit.match());
             if (link.isEmpty() || link.startsWith("http") || link.startsWith("#") || link.startsWith("mailto:")) {
                 continue;
