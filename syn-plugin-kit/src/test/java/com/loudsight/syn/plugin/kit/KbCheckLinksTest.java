@@ -167,6 +167,22 @@ class KbCheckLinksTest {
         assertTrue(result.stdout().contains("../gone.md"), result.stdout());
     }
 
+    @Test
+    void aSymlinkedMarkdownFileIsScannedOnlyAtItsTarget(@TempDir Path root) throws Exception {
+        Fixtures.write(root.resolve("kb/sub/SKILL.md"), "[ok](../sub/SKILL.md)\n");
+        try {
+            Files.createSymbolicLink(root.resolve("kb/alias.md"), Path.of("sub/SKILL.md"));
+        } catch (UnsupportedOperationException | IOException noSymlinks) {
+            assumeTrue(false, "symlinks are not available");
+        }
+        Fixtures.write(root.resolve("kb/sub/ok.md"), "[ok](ok.md)\n");
+        Fixtures.gitInit(root);
+
+        Result result = Fixtures.run(new KbCheckLinks(), root);
+
+        assertEquals(ExitCodes.OK, result.exit(), result.stdout());
+    }
+
     /** The reported Windows failure: the backslashes of the old grep pattern were lost, and the stripped pattern matches any "]" + text. */
     @Test
     void theLinkPatternNeedsItsBackslashesAndTheCheckerDoesNotShellOutForIt() {

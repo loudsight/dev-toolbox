@@ -11,6 +11,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import com.loudsight.syn.spi.Output;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -102,7 +103,8 @@ public final class KbCheckLinks implements SynCommand {
 
         /**
          * Markdown links ({@code ](target)}) in the {@code *.md} files under {@code where}, found in-process: an external
-         * grep loses the backslashes of the pattern between Java and grep.exe on Windows.
+         * grep loses the backslashes of the pattern between Java and grep.exe on Windows. Like {@code grep -r}, files that are
+         * symlinks are skipped (their target is scanned at its own location).
          */
         List<Hit> markdownLinks(String where) {
             Path start = root.resolve(where);
@@ -112,7 +114,7 @@ public final class KbCheckLinks implements SynCommand {
             }
             try (Stream<Path> files = Files.walk(start.toRealPath())) {
                 Path realStart = start.toRealPath();
-                for (Path file : files.filter(f -> f.toString().endsWith(".md") && Files.isRegularFile(f)).sorted().toList()) {
+                for (Path file : files.filter(f -> f.toString().endsWith(".md") && Files.isRegularFile(f, LinkOption.NOFOLLOW_LINKS)).sorted().toList()) {
                     String name = where + "/" + realStart.relativize(file).toString().replace('\\', '/');
                     List<String> lines;
                     try {
