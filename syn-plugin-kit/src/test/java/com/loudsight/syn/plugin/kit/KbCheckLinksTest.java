@@ -144,6 +144,41 @@ class KbCheckLinksTest {
     }
 
     @Test
+    void bracketsThatAreNotLinksAreNotReported(@TempDir Path root) throws Exception {
+        Fixtures.write(root.resolve("kb/plans/real.md"), "x\n");
+        Fixtures.write(root.resolve("kb/README.md"),
+                "- [x] then text (done)\na] b (c)\n]x( y )\nC:\\dir\\file] (z)\nreal [link](plans/real.md).\n");
+        Fixtures.gitInit(root);
+
+        Result result = Fixtures.run(new KbCheckLinks(), root);
+
+        assertEquals(ExitCodes.OK, result.exit(), result.stdout());
+    }
+
+    @Test
+    void aRealDeadLinkIsReportedWithItsLineNumber(@TempDir Path root) throws Exception {
+        Fixtures.write(root.resolve("kb/sub/a.md"), "ok\n[x] y\nsee [d](../gone.md#h) and [e](ok.md)\n");
+        Fixtures.gitInit(root);
+
+        Result result = Fixtures.run(new KbCheckLinks(), root);
+
+        assertEquals(ExitCodes.FAILURE, result.exit(), result.stdout());
+        assertTrue(result.stdout().contains("kb/sub/a.md:3"), result.stdout());
+        assertTrue(result.stdout().contains("../gone.md"), result.stdout());
+    }
+
+    /** The reported Windows failure: the backslashes of the old grep pattern were lost, and the stripped pattern matches any "]" + text. */
+    @Test
+    void theLinkPatternNeedsItsBackslashesAndTheCheckerDoesNotShellOutForIt() {
+        String degraded = KbCheckLinks.MARKDOWN_LINK.pattern().replace("\\", "");
+        for (String notALink : new String[] {"[x] then text (done)", "a] b (c)"}) {
+            assertFalse(KbCheckLinks.MARKDOWN_LINK.matcher(notALink).find(), notALink);
+            assertTrue(java.util.regex.Pattern.compile(degraded).matcher(notALink).find(), "degraded pattern matches " + notALink);
+        }
+        assertTrue(KbCheckLinks.MARKDOWN_LINK.matcher("[a](b.md)").find());
+    }
+
+    @Test
     void configuredAdviceIsAppendedUnlessQuiet(@TempDir Path root) throws Exception {
         configure(root, "kb.advice=do not link into kb/staging\n");
         Fixtures.write(root.resolve("kb/README.md"), "See kb/plans/gone.md\n");
