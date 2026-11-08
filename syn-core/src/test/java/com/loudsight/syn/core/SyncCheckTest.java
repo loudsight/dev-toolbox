@@ -23,6 +23,15 @@ class SyncCheckTest {
             """;
 
     @Test
+    void theBranchIsGenericUnlessTheRepoConfiguresIt(@TempDir Path root) throws IOException {
+        assertEquals("main", SyncCheck.branch(root));
+        Files.createDirectory(root.resolve(".syn"));
+        Files.writeString(root.resolve(".syn/config.properties"), "remote.branch=master\n");
+
+        assertEquals("master", SyncCheck.branch(root));
+    }
+
+    @Test
     void parseReadsTheCommitTheModifiedFilesAndEachSubmodulesCommit() {
         SyncCheck.State state = SyncCheck.State.parse("""
                 abc123
@@ -173,15 +182,15 @@ class SyncCheckTest {
         git(here, "remote", "add", "origin", origin.toString());
         git(here, "push", "-q", "origin", "HEAD:master");
 
-        assertEquals(List.of(), SyncCheck.warningBeforeSync(here, Set.of()), "pushed and clean: nothing to say");
+        assertEquals(List.of(), SyncCheck.warningBeforeSync(here, Set.of(), "master"), "pushed and clean: nothing to say");
 
         Files.writeString(here.resolve("a.txt"), "edited\n");
-        List<String> edited = SyncCheck.warningBeforeSync(here, Set.of());
+        List<String> edited = SyncCheck.warningBeforeSync(here, Set.of(), "master");
         assertEquals(1, edited.size(), edited.toString());
         assertTrue(edited.get(0).startsWith("syn: note: 1 uncommitted file(s)"), edited.get(0));
 
         git(here, "commit", "-q", "-am", "two, not pushed");
-        List<String> unpushed = SyncCheck.warningBeforeSync(here, Set.of());
+        List<String> unpushed = SyncCheck.warningBeforeSync(here, Set.of(), "master");
         assertTrue(unpushed.get(0).startsWith("!!!!"), unpushed.toString());
         assertTrue(unpushed.stream().anyMatch(line -> line.contains("origin/master (what the host pulls) is at")), unpushed.toString());
         assertTrue(unpushed.stream().anyMatch(line -> line.contains("Push first")), unpushed.toString());

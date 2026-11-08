@@ -12,10 +12,20 @@ import org.junit.jupiter.api.Test;
 class RemoteExecTest {
 
     @Test
+    void theLauncherIsGenericUnlessTheRepoConfiguresIt(@org.junit.jupiter.api.io.TempDir java.nio.file.Path root) throws java.io.IOException {
+        assertEquals("syn", RemoteExec.launcher(root));
+        java.nio.file.Files.createDirectory(root.resolve(".syn"));
+        java.nio.file.Files.writeString(root.resolve(".syn/config.properties"), "remote.launcher=scripts/syn\n");
+
+        assertEquals("scripts/syn", RemoteExec.launcher(root));
+        assertEquals("cd /x && scripts/syn a", RemoteExec.script("/x", List.of("a"), false, RemoteExec.DEFAULT_HOST_SYNC, "scripts/syn"));
+    }
+
+    @Test
     void theScriptEntersTheCheckoutAndRunsSynWithTheSameArguments() {
         String script = RemoteExec.script("/srv/checkout", List.of("build-run-modules", "--modules", "x", "--dry-run"));
 
-        assertEquals("cd /srv/checkout && scripts/syn build-run-modules --modules x --dry-run", script);
+        assertEquals("cd /srv/checkout && syn build-run-modules --modules x --dry-run", script);
     }
 
     /** The host's shell sees the script after ssh's own word splitting, so quote twice and let a real bash undo both. */
@@ -27,19 +37,19 @@ class RemoteExecTest {
         String evaluated = Cmd.of("bash", "-c", "printf '%s\\n' " + RemoteExec.sshCommand("h", script).get(10)).capture().orThrow();
 
         assertEquals(script, evaluated.strip(), "the outer quoting must hand the host's bash the script unchanged");
-        String inner = Cmd.of("bash", "-c", "set -- " + script.substring(script.indexOf("scripts/syn ") + "scripts/syn ".length())
+        String inner = Cmd.of("bash", "-c", "set -- " + script.substring(script.indexOf("syn ") + "syn ".length())
                 + "; printf '%s\\n' \"$@\"").capture().orThrow();
         assertEquals(String.join("\n", tricky), inner.strip());
     }
 
     @Test
     void sshRunsTheScriptAsOneQuotedArgumentOfBashCWithTimeouts() {
-        List<String> ssh = RemoteExec.sshCommand("deploy@host.invalid", "cd /x && scripts/syn a");
+        List<String> ssh = RemoteExec.sshCommand("deploy@host.invalid", "cd /x && syn a");
 
         assertEquals(List.of("ssh", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
                 "deploy@host.invalid", "bash", "-c"), ssh.subList(0, 10));
         assertEquals(11, ssh.size());
-        assertEquals("'cd /x && scripts/syn a'", ssh.get(10));
+        assertEquals("'cd /x && syn a'", ssh.get(10));
     }
 
     @Test
@@ -51,9 +61,9 @@ class RemoteExecTest {
         int enter = script.indexOf("cd /srv/checkout");
         int pull = script.indexOf("git pull -q");
         int submodules = script.indexOf("git submodule update");
-        int syn = script.indexOf("scripts/syn build-run-modules --dry-run");
+        int syn = script.indexOf("syn build-run-modules --dry-run");
         assertTrue(strict == 0 && strict < enter && enter < pull && pull < submodules && submodules < syn, script);
-        assertTrue(script.endsWith("scripts/syn build-run-modules --dry-run\n"), script);
+        assertTrue(script.endsWith("syn build-run-modules --dry-run\n"), script);
         assertTrue(Cmd.of("bash", "-n").stdin(script).capture().ok(), "bash -n rejected the sync script");
     }
 
@@ -81,8 +91,8 @@ class RemoteExecTest {
         String plain = RemoteExec.script("/x", List.of("a"), false, CUSTOM);
         String sync = RemoteExec.script("/x", List.of("a"), true, CUSTOM);
 
-        assertEquals("source /etc/custom-env.sh && export WORK_ROOT=/srv && cd /x && scripts/syn a", plain);
-        assertEquals("source /etc/custom-env.sh\nexport WORK_ROOT=/srv\nset -e\ncd /x\necho custom-sync\nscripts/syn a\n", sync);
+        assertEquals("source /etc/custom-env.sh && export WORK_ROOT=/srv && cd /x && syn a", plain);
+        assertEquals("source /etc/custom-env.sh\nexport WORK_ROOT=/srv\nset -e\ncd /x\necho custom-sync\nsyn a\n", sync);
     }
 
     @Test

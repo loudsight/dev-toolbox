@@ -20,6 +20,9 @@ public final class SyncCheck {
     static final String STATE_SCRIPT = "git rev-parse HEAD; echo @@DIRTY; git status --porcelain --untracked-files=no;"
             + " echo @@SUBMODULES; git submodule status --recursive";
 
+    /** The branch pulled by {@code --sync} when {@code remote.branch} is not set. */
+    public static final String DEFAULT_BRANCH = "main";
+
     private SyncCheck() {
     }
 
@@ -138,23 +141,34 @@ public final class SyncCheck {
     }
 
     /**
-     * The lines to print before a {@code --sync} run. The host is about to pull origin/master, so what matters is not
-     * how the host stands now but whether origin/master is the code here: a commit not pushed yet, or one pushed from
+     * The lines to print before a {@code --sync} run. The host is about to pull origin's branch, so what matters is not
+     * how the host stands now but whether that branch is the code here: a commit not pushed yet, or one pushed from
      * elsewhere, is loud, and uncommitted local edits are a note, as without {@code --sync}.
      */
     public static List<String> warningBeforeSync(Path repoRoot, Set<String> ignored) {
+        return warningBeforeSync(repoRoot, ignored, branch(repoRoot));
+    }
+
+    /** The branch the host pulls: {@code remote.branch} in the repo's syn settings, else {@link #DEFAULT_BRANCH}. */
+    public static String branch(Path repoRoot) {
+        return SynConfig.load(repoRoot).get("remote.branch").orElse(DEFAULT_BRANCH);
+    }
+
+    /** As {@link #warningBeforeSync(Path, Set)}, for the named branch of origin. */
+    public static List<String> warningBeforeSync(Path repoRoot, Set<String> ignored, String branch) {
+        String originRef = "origin/" + branch;
         Cmd.Result local = Cmd.of("bash", "-c", STATE_SCRIPT).dir(repoRoot).capture();
-        Cmd.Result origin = Cmd.of("git", "ls-remote", "origin", "refs/heads/master").dir(repoRoot).capture();
+        Cmd.Result origin = Cmd.of("git", "ls-remote", "origin", "refs/heads/" + branch).dir(repoRoot).capture();
         String originHead = origin.ok() ? firstField(origin.stdout()) : "";
         if (!local.ok() || originHead.isEmpty()) {
-            return block("WARNING: --sync could not compare this machine with origin/master",
+            return block("WARNING: --sync could not compare this machine with " + originRef,
                     List.of("git state unreadable (exit " + local.exitCode() + " here, " + origin.exitCode() + " for origin)"),
-                    "The host will pull origin/master whatever is here.");
+                    "The host will pull " + originRef + " whatever is here.");
         }
         State here = State.parse(local.stdout());
         // Compare the superproject commit only: the pre-push hook refuses a pointer to a submodule commit that is not pushed.
-        Findings found = differences(here, new State(originHead, List.of(), here.submodules()), ignored, "origin/master (what the host pulls)");
-        List<String> lines = new ArrayList<>(block("WARNING: --sync will run origin/master, which is NOT the code on this machine",
+        Findings found = differences(here, new State(originHead, List.of(), here.submodules()), ignored, originRef + " (what the host pulls)");
+        List<String> lines = new ArrayList<>(block("WARNING: --sync will run " + originRef + ", which is NOT the code on this machine",
                 found.loud(), "Push first (or pull here) so the host runs what you expect."));
         found.notes().forEach(note -> lines.add("syn: note: " + note));
         return lines;
@@ -176,7 +190,7 @@ public final class SyncCheck {
         return ignored.stream().anyMatch(prefix -> path.equals(prefix) || path.startsWith(prefix + "/"));
     }
 
-    /** {@code "<sha>\trefs/heads/master"} to {@code <sha>}; empty for blank output. */
+    /** {@code "<sha>\trefs/heads/<branch>"} to {@code <sha>}; empty for blank output. */
     private static String firstField(String line) {
         String text = line.strip();
         int end = 0;
