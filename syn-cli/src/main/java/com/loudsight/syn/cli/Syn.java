@@ -254,7 +254,7 @@ public final class Syn {
         // A command that changes things runs detached, so a dropped connection cannot end it half way; a read-only one just streams.
         boolean detach = tier != Tier.READ_ONLY;
         session.err().println("syn: " + name + " on " + host + ":" + checkout + (sync ? " (pulling first)" : "") + (detach ? " (detached)" : ""));
-        return session.remote().run(new RemoteExec.Request(host, checkout, session.onRemote().args(), sync, detach, session.hostSync().hostSync()),session.out(), session.err());
+        return session.remote().run(new RemoteExec.Request(host, checkout, session.onRemote().args(), sync, detach, session.hostSync().hostSync(), RemoteExec.launcher(session.repoRoot())), session.out(), session.err());
     }
 
     private static List<CommandDescriptor> describe(CommandLine commandLine, Map<String, String> origins) {

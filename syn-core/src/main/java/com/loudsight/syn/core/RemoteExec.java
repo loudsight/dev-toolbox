@@ -3,6 +3,7 @@ package com.loudsight.syn.core;
 import com.loudsight.scriptkit.Cmd;
 import com.loudsight.scriptkit.Shell;
 import com.loudsight.syn.spi.HostSync;
+import java.nio.file.Path;
 import java.io.PrintStream;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -39,17 +40,31 @@ public final class RemoteExec {
      * @param sync whether the host pulls first ({@link HostSync#syncFragment()})
      * @param detach whether it runs as a {@link RemoteJob} that survives a dropped connection
      * @param hostSync the host setup; {@link #DEFAULT_HOST_SYNC} unless a plugin supplies one
+     * @param launcher the command that starts syn in the host's checkout; see {@link #launcher}
      */
-    public record Request(String host, String checkout, List<String> args, boolean sync, boolean detach, HostSync hostSync) {
+    public record Request(String host, String checkout, List<String> args, boolean sync, boolean detach, HostSync hostSync, String launcher) {
 
         public Request {
             args = List.copyOf(args);
         }
 
-        /** A request with the default host setup. */
-        public Request(String host, String checkout, List<String> args, boolean sync, boolean detach) {
-            this(host, checkout, args, sync, detach, DEFAULT_HOST_SYNC);
+        /** A request with the default launcher. */
+        public Request(String host, String checkout, List<String> args, boolean sync, boolean detach, HostSync hostSync) {
+            this(host, checkout, args, sync, detach, hostSync, DEFAULT_LAUNCHER);
         }
+
+        /** A request with the default host setup and launcher. */
+        public Request(String host, String checkout, List<String> args, boolean sync, boolean detach) {
+            this(host, checkout, args, sync, detach, DEFAULT_HOST_SYNC, DEFAULT_LAUNCHER);
+        }
+    }
+
+    /** The launcher when {@code remote.launcher} is not set: {@code syn} on the host's PATH. */
+    public static final String DEFAULT_LAUNCHER = "syn";
+
+    /** {@code remote.launcher} in the repo's syn settings (e.g. {@code scripts/syn}, relative to the checkout), else {@link #DEFAULT_LAUNCHER}. */
+    public static String launcher(Path repoRoot) {
+        return SynConfig.load(repoRoot).get("remote.launcher").orElse(DEFAULT_LAUNCHER);
     }
 
     /** The host setup used when no plugin supplies one. */
@@ -67,7 +82,12 @@ public final class RemoteExec {
 
     /** As {@link #script(String, List, boolean)}, with the host setup taken from {@code hostSync}. */
     public static String script(String checkout, List<String> args, boolean sync, HostSync hostSync) {
-        String syn = Stream.concat(Stream.of("scripts/syn"), args.stream()).map(Shell::quote).collect(Collectors.joining(" "));
+        return script(checkout, args, sync, hostSync, DEFAULT_LAUNCHER);
+    }
+
+    /** As {@link #script(String, List, boolean, HostSync)}, starting syn with {@code launcher}. */
+    public static String script(String checkout, List<String> args, boolean sync, HostSync hostSync, String launcher) {
+        String syn = Stream.concat(Stream.of(launcher), args.stream()).map(Shell::quote).collect(Collectors.joining(" "));
         String prelude = hostSync.envPrelude();
         String lines = prelude.strip();
         String before = lines.isEmpty() ? "" : String.join(" && ", lines.split("\n")) + " && ";
@@ -91,7 +111,7 @@ public final class RemoteExec {
 
     /** Runs the request, detached or streaming as it says; returns the command's exit code. */
     public static int run(Request request, PrintStream out, PrintStream err) throws InterruptedException {
-        String script = script(request.checkout(), request.args(), request.sync(), request.hostSync());
+        String script = script(request.checkout(), request.args(), request.sync(), request.hostSync(), request.launcher());
         return request.detach() ? runDetached(request.host(), script, out, err) : Cmd.of(sshCommand(request.host(), script)).stream();
     }
 
