@@ -28,9 +28,10 @@ import picocli.CommandLine.Option;
  * Refuses a commit or push to a public repo during the working day on a weekday, so work on the public libraries
  * happens outside it. The hooks run this before {@code publish-check-private}.
  *
- * <p>Blocked: Monday to Friday, from {@code publish.block-start} (07:00) up to but not including
- * {@code publish.block-end} (19:00), in {@code publish.block-zone} (America/New_York, so "EST" follows daylight saving),
- * unless the date is listed in the holidays file ({@code publish.block-holidays-file}, edited with
+ * <p>Opt-in: with neither {@code publish.block-start} nor {@code publish.block-end} configured nothing is ever blocked.
+ * Once configured, blocked: Monday to Friday, from {@code publish.block-start} up to but not including
+ * {@code publish.block-end} (both HH:mm, both required), in {@code publish.block-zone} (an IANA zone id, default UTC, so a
+ * region zone follows daylight saving), unless the date is listed in the holidays file ({@code publish.block-holidays-file}, edited with
  * {@code syn publish-edit-holidays}). Setting {@code SYN_WORKHOURS_OVERRIDE} to anything but {@code 0} or {@code false}
  * lets the commit through. A repo without a {@code .public-repo} marker is skipped. A malformed setting fails with the
  * key named rather than falling back, since a silent fallback would turn the block off. Reads nothing from stdin: the
@@ -45,6 +46,8 @@ import picocli.CommandLine.Option;
 public final class PublishCheckWorkingHours implements SynCommand {
 
     static final String OVERRIDE = "SYN_WORKHOURS_OVERRIDE";
+    static final String START_KEY = "publish.block-start";
+    static final String END_KEY = "publish.block-end";
     static final String HOLIDAYS_KEY = "publish.block-holidays-file";
     static final String DEFAULT_HOLIDAYS = ".syn/block-holidays.txt";
     private static final String MARKER = ".public-repo";
@@ -74,14 +77,18 @@ public final class PublishCheckWorkingHours implements SynCommand {
             return ExitCodes.OK;
         }
         SynConfig config = SynConfig.load(context.repoRoot());
+        if (config.get(START_KEY).isEmpty() && config.get(END_KEY).isEmpty()) {
+            checks.skip("no " + START_KEY + " / " + END_KEY + " configured: nothing is blocked");
+            return ExitCodes.OK;
+        }
         LocalTime start;
         LocalTime end;
         ZoneId zone;
         ZonedDateTime now;
         Map<LocalDate, String> holidays;
         try {
-            start = time(config, "publish.block-start", "07:00");
-            end = time(config, "publish.block-end", "19:00");
+            start = time(config, START_KEY);
+            end = time(config, END_KEY);
             zone = zone(config);
             now = at == null ? ZonedDateTime.now(zone) : Instant.parse(at).atZone(zone);
             holidays = BlockHolidays.read(context.repoRoot().resolve(config.get(HOLIDAYS_KEY).orElse(DEFAULT_HOLIDAYS)));
@@ -96,8 +103,7 @@ public final class PublishCheckWorkingHours implements SynCommand {
             checks.ok(outside);
             return ExitCodes.OK;
         }
-        String override = Env.get(OVERRIDE).orElse("");
-        if (!override.isBlank() && !"0".equals(override) && !"false".equals(override)) {
+        if (overrideActive(Env.get(OVERRIDE).orElse(""))) {
             String allowed = reason + " — allowed because " + OVERRIDE + " is set";
             checks.warn(allowed);
             return ExitCodes.OK;
@@ -121,8 +127,13 @@ public final class PublishCheckWorkingHours implements SynCommand {
         return "public-repo commits are blocked during working hours (" + day + " " + time.withNano(0) + " " + now.getZone() + ")";
     }
 
-    private static LocalTime time(SynConfig config, String key, String fallback) {
-        String value = config.get(key).orElse(fallback);
+    /** True when the override variable's value asks to let the commit through. */
+    static boolean overrideActive(String value) {
+        return !value.isBlank() && !"0".equals(value) && !"false".equals(value);
+    }
+
+    private static LocalTime time(SynConfig config, String key) {
+        String value = config.get(key).orElseThrow(() -> new IllegalArgumentException(key + " is not set: set both " + START_KEY + " and " + END_KEY));
         try {
             return LocalTime.parse(value);
         } catch (DateTimeParseException e) {
@@ -131,7 +142,7 @@ public final class PublishCheckWorkingHours implements SynCommand {
     }
 
     private static ZoneId zone(SynConfig config) {
-        String value = config.get("publish.block-zone").orElse("America/New_York");
+        String value = config.get("publish.block-zone").orElse("UTC");
         try {
             return ZoneId.of(value);
         } catch (DateTimeException e) {

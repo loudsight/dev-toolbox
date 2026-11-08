@@ -1,6 +1,7 @@
 package com.loudsight.syn.plugin.kit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.loudsight.syn.plugin.kit.Fixtures.Result;
@@ -17,9 +18,38 @@ class PublishCheckWorkingHoursTest {
         return Fixtures.run(new PublishCheckWorkingHours(), root, "--repo", root.toString(), "--at", at);
     }
 
+    /** A public repo with a 09:00-17:00 New York weekday window configured. */
     private static Path publicRepo(Path root) throws Exception {
         Fixtures.write(root.resolve(".public-repo"), "");
+        Fixtures.write(root.resolve(".syn/config.properties"),
+                "publish.block-start=09:00\npublish.block-end=17:00\npublish.block-zone=America/New_York\n");
         return root;
+    }
+
+    @Test
+    void noConfigurationNeverBlocks(@TempDir Path root) throws Exception {
+        Fixtures.write(root.resolve(".public-repo"), "");
+        Result result = check(root, TUESDAY_10AM);
+        assertEquals(0, result.exit(), result.stdout());
+        assertTrue(result.stdout().contains("nothing is blocked"), result.stdout());
+    }
+
+    @Test
+    void onlyOneOfStartAndEndFailsNamingTheMissingKey(@TempDir Path root) throws Exception {
+        Fixtures.write(root.resolve(".public-repo"), "");
+        Fixtures.write(root.resolve(".syn/config.properties"), "publish.block-start=09:00\n");
+        Result result = check(root, TUESDAY_10AM);
+        assertEquals(2, result.exit());
+        assertTrue(result.stderr().contains("publish.block-end"), result.stderr());
+    }
+
+    @Test
+    void theOverrideValueIsHonouredUnlessUnsetZeroOrFalse() {
+        assertTrue(PublishCheckWorkingHours.overrideActive("1"));
+        assertTrue(PublishCheckWorkingHours.overrideActive("yes"));
+        assertFalse(PublishCheckWorkingHours.overrideActive(""));
+        assertFalse(PublishCheckWorkingHours.overrideActive("0"));
+        assertFalse(PublishCheckWorkingHours.overrideActive("false"));
     }
 
     @Test
@@ -32,18 +62,18 @@ class PublishCheckWorkingHoursTest {
     @Test
     void theWindowIsStartInclusiveEndExclusiveInTheZone(@TempDir Path root) throws Exception {
         publicRepo(root);
-        assertEquals(0, check(root, "2026-10-13T10:59:59Z").exit(), "06:59:59 EDT is before the window");
-        assertEquals(1, check(root, "2026-10-13T11:00:00Z").exit(), "07:00 EDT is inside it");
-        assertEquals(1, check(root, "2026-10-13T22:59:59Z").exit(), "18:59:59 EDT is inside it");
-        assertEquals(0, check(root, "2026-10-13T23:00:00Z").exit(), "19:00 EDT is outside it");
+        assertEquals(0, check(root, "2026-10-13T12:59:59Z").exit(), "08:59:59 EDT is before the window");
+        assertEquals(1, check(root, "2026-10-13T13:00:00Z").exit(), "09:00 EDT is inside it");
+        assertEquals(1, check(root, "2026-10-13T20:59:59Z").exit(), "16:59:59 EDT is inside it");
+        assertEquals(0, check(root, "2026-10-13T21:00:00Z").exit(), "17:00 EDT is outside it");
     }
 
     @Test
     void theZoneFollowsDaylightSaving(@TempDir Path root) throws Exception {
         publicRepo(root);
-        // 2026-12-01 is a Tuesday in EST (UTC-5): 12:00Z is 07:00 and 11:59Z is 06:59.
-        assertEquals(1, check(root, "2026-12-01T12:00:00Z").exit());
-        assertEquals(0, check(root, "2026-12-01T11:59:59Z").exit());
+        // 2026-12-01 is a Tuesday in EST (UTC-5): 14:00Z is 09:00 and 13:59Z is 08:59.
+        assertEquals(1, check(root, "2026-12-01T14:00:00Z").exit());
+        assertEquals(0, check(root, "2026-12-01T13:59:59Z").exit());
     }
 
     @Test
@@ -81,7 +111,7 @@ class PublishCheckWorkingHoursTest {
     @Test
     void aMalformedSettingFailsNamingTheKeyInsteadOfFallingBack(@TempDir Path root) throws Exception {
         publicRepo(root);
-        Fixtures.write(root.resolve(".syn/config.properties"), "publish.block-start=breakfast\n");
+        Fixtures.write(root.resolve(".syn/config.properties"), "publish.block-start=breakfast\npublish.block-end=17:00\n");
         Result result = check(root, TUESDAY_10AM);
         assertEquals(2, result.exit());
         assertTrue(result.stderr().contains("publish.block-start"), result.stderr());
