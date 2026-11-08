@@ -12,11 +12,10 @@ import org.junit.jupiter.api.Test;
 class RemoteExecTest {
 
     @Test
-    void theScriptSourcesTheHostToolchainEntersTheCheckoutAndRunsSynWithTheSameArguments() {
-        String script = RemoteExec.script("/opt/code/synergistically", List.of("build-run-modules", "--modules", "x", "--dry-run"));
+    void theScriptEntersTheCheckoutAndRunsSynWithTheSameArguments() {
+        String script = RemoteExec.script("/srv/checkout", List.of("build-run-modules", "--modules", "x", "--dry-run"));
 
-        assertEquals("source /opt/myEnv.sh && export WORK_ROOT=/opt && cd /opt/code/synergistically"
-                + " && scripts/syn build-run-modules --modules x --dry-run", script);
+        assertEquals("cd /srv/checkout && scripts/syn build-run-modules --modules x --dry-run", script);
     }
 
     /** The host's shell sees the script after ssh's own word splitting, so quote twice and let a real bash undo both. */
@@ -44,17 +43,16 @@ class RemoteExecTest {
     }
 
     @Test
-    void aSyncScriptTakesTheLockAndPullsBeforeItRunsSynAndIsValidBash() {
-        String script = RemoteExec.script("/opt/code/synergistically", List.of("build-run-modules", "--dry-run"), true);
+    void aSyncScriptPullsAndUpdatesSubmodulesBeforeItRunsSynAndIsValidBash() {
+        String script = RemoteExec.script("/srv/checkout", List.of("build-run-modules", "--dry-run"), true);
 
-        assertTrue(script.contains(HostPrep.sync()), script);
-        int env = script.indexOf("source /opt/myEnv.sh");
+        assertTrue(script.contains(new GenericHostSync().syncFragment()), script);
         int strict = script.indexOf("set -e");
-        int enter = script.indexOf("cd /opt/code/synergistically");
-        int lock = script.indexOf("flock -n 9");
-        int pull = script.indexOf("git pull --no-recurse-submodules origin master");
+        int enter = script.indexOf("cd /srv/checkout");
+        int pull = script.indexOf("git pull -q");
+        int submodules = script.indexOf("git submodule update");
         int syn = script.indexOf("scripts/syn build-run-modules --dry-run");
-        assertTrue(env >= 0 && env < strict && strict < enter && enter < lock && lock < pull && pull < syn, script);
+        assertTrue(strict == 0 && strict < enter && enter < pull && pull < submodules && submodules < syn, script);
         assertTrue(script.endsWith("scripts/syn build-run-modules --dry-run\n"), script);
         assertTrue(Cmd.of("bash", "-n").stdin(script).capture().ok(), "bash -n rejected the sync script");
     }
