@@ -4,8 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.loudsight.syn.core.RemoteExec;
+import com.loudsight.syn.core.SynConfig;
+import com.loudsight.syn.spi.HostSync;
 import com.loudsight.syn.spi.SynCommand;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -65,13 +69,21 @@ class PluginLoaderTest {
                 + "  public com.loudsight.syn.spi.Tier tier() { return com.loudsight.syn.spi.Tier.READ_ONLY; }"
                 + "  public int run(com.loudsight.syn.spi.Context context) { return 0; }"
                 + "}";
+        installJar(plugins, name, SynCommand.class, className, List.of(new Source(className, code)));
+    }
+
+    /**
+     * Compiles {@code sources} and jars only {@code className} (not its helpers) with a services file for {@code service}, so
+     * a helper class can be compiled yet left out, as a plugin built against a different head would lack it.
+     */
+    private static void installJar(Path plugins, String name, Class<?> service, String className, List<Source> sources) throws IOException {
         Path classes = plugins.resolveSibling("classes-" + name);
         Files.createDirectories(classes);
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         assertNotNull(compiler, "tests need a JDK, not a JRE");
-        String spi = SynCommand.class.getProtectionDomain().getCodeSource().getLocation().getPath();
-        Boolean compiled = compiler.getTask(null, null, null, List.of("-classpath", spi, "-d", classes.toString()), null, List.of(new Source(className, code))).call();
-        assertTrue(compiled, "could not compile the test plugin");
+        String spi = service.getProtectionDomain().getCodeSource().getLocation().getPath();
+        assertTrue(compiler.getTask(null, null, null, List.of("-classpath", spi, "-d", classes.toString()), null, sources).call(),
+                "could not compile the test plugin");
 
         Path libs = plugins.resolve(name).resolve("current/libs");
         Files.createDirectories(libs);
@@ -80,10 +92,109 @@ class PluginLoaderTest {
             jar.putNextEntry(new JarEntry(classFile));
             jar.write(Files.readAllBytes(classes.resolve(classFile)));
             jar.closeEntry();
-            jar.putNextEntry(new JarEntry("META-INF/services/" + SynCommand.class.getName()));
+            jar.putNextEntry(new JarEntry("META-INF/services/" + service.getName()));
             jar.write((className + "\n").getBytes(StandardCharsets.UTF_8));
             jar.closeEntry();
         }
+    }
+
+    /**
+     * A plugin whose only service is a {@link HostSync}; with {@code missingDependency} its class needs another class that
+     * is left out of the jar, as a plugin built against a different head would.
+     */
+    private static void installHostSyncPlugin(Path plugins, String name, boolean missingDependency) throws IOException {
+        String className = "plugin." + name + ".Sync";
+        // A field initialiser, so instantiating the provider needs the missing class.
+        String field = missingDependency ? "private final Object helper = new plugin." + name + ".Helper();" : "";
+        String code = "package plugin." + name + ";"
+                + "public final class Sync implements com.loudsight.syn.spi.HostSync {" + field
+                + "  public String envPrelude() { return \"source /plugin/" + name + ".sh\"; }"
+                + "  public String syncFragment() { return \"echo " + name + "\\n\"; }"
+                + "}";
+        List<Source> sources = new ArrayList<>(List.of(new Source(className, code)));
+        if (missingDependency) {
+            sources.add(new Source("plugin." + name + ".Helper", "package plugin." + name + "; public final class Helper { }"));
+        }
+        installJar(plugins, name, HostSync.class, className, sources);
+    }
+
+    private static HostSyncChoice choose(Path temp, String config, List<String> warnings) throws IOException {
+        Path repo = temp.resolve("repo");
+        Files.createDirectories(repo.resolve(".syn"));
+        Files.writeString(repo.resolve(".syn/config.properties"), config);
+        return HostSyncChoice.resolve(PluginLoader.services(HostSync.class, temp.resolve("plugins"), HEAD, warnings::add), SynConfig.load(repo));
+    }
+
+    @Test
+    void findsAServiceOtherThanACommandInAPluginAndNamesItsOrigin(@TempDir Path temp) throws IOException {
+        installHostSyncPlugin(temp.resolve("plugins"), "alpha", false);
+        List<String> warnings = new ArrayList<>();
+
+        List<PluginLoader.Service<HostSync>> found = PluginLoader.services(HostSync.class, temp.resolve("plugins"), HEAD, warnings::add);
+
+        assertEquals(1, found.size());
+        assertEquals("alpha", found.get(0).origin());
+        assertEquals("source /plugin/alpha.sh", found.get(0).service().envPrelude());
+        assertTrue(warnings.isEmpty(), warnings.toString());
+    }
+
+    @Test
+    void aProviderThatDoesNotLinkIsSkippedWithAClearWarningNotACrash(@TempDir Path temp) throws IOException {
+        Path plugins = temp.resolve("plugins");
+        installHostSyncPlugin(plugins, "good", false);
+        installHostSyncPlugin(plugins, "stale", true);
+        List<String> warnings = new ArrayList<>();
+
+        List<PluginLoader.Service<HostSync>> found = PluginLoader.services(HostSync.class, plugins, HEAD, warnings::add);
+
+        assertEquals(List.of("good"), found.stream().map(PluginLoader.Service::origin).toList());
+        assertEquals(1, warnings.size(), warnings.toString());
+        assertTrue(warnings.get(0).contains("stale") && warnings.get(0).contains("link"), warnings.get(0));
+    }
+
+    @Test
+    void withNoProviderTheDefaultHostSyncIsUsed(@TempDir Path temp) throws IOException {
+        HostSyncChoice choice = choose(temp, "", new ArrayList<>());
+
+        assertSame(RemoteExec.DEFAULT_HOST_SYNC, choice.hostSync());
+        assertTrue(choice.problems().isEmpty() && choice.refusal().isEmpty());
+    }
+
+    @Test
+    void aSingleProviderIsUsed(@TempDir Path temp) throws IOException {
+        installHostSyncPlugin(temp.resolve("plugins"), "alpha", false);
+
+        HostSyncChoice choice = choose(temp, "", new ArrayList<>());
+
+        assertEquals("alpha", choice.origin());
+        assertEquals("source /plugin/alpha.sh", choice.hostSync().envPrelude());
+        assertTrue(choice.problems().isEmpty());
+    }
+
+    @Test
+    void twoProvidersAreAProblemUntilAnOverridePicksOne(@TempDir Path temp) throws IOException {
+        installHostSyncPlugin(temp.resolve("plugins"), "alpha", false);
+        installHostSyncPlugin(temp.resolve("plugins"), "beta", false);
+
+        HostSyncChoice unresolved = choose(temp, "", new ArrayList<>());
+        HostSyncChoice resolved = choose(temp, "override.host-sync=beta\n", new ArrayList<>());
+
+        assertEquals(1, unresolved.problems().size());
+        assertTrue(unresolved.problems().get(0).contains("alpha and beta"), unresolved.problems().toString());
+        assertTrue(resolved.problems().isEmpty(), resolved.problems().toString());
+        assertEquals("beta", resolved.origin());
+    }
+
+    @Test
+    void aRequiredPluginThatIsMissingRefusesInsteadOfUsingTheDefault(@TempDir Path temp) throws IOException {
+        HostSyncChoice missing = choose(temp, "remote.host-sync=alpha\n", new ArrayList<>());
+        installHostSyncPlugin(temp.resolve("plugins"), "alpha", false);
+        HostSyncChoice present = choose(temp, "remote.host-sync=alpha\n", new ArrayList<>());
+
+        assertTrue(missing.refusal().isPresent());
+        assertTrue(missing.refusal().get().contains("alpha"), missing.refusal().get());
+        assertTrue(present.refusal().isEmpty());
+        assertTrue(present.report().contains("host-sync: alpha"), present.report());
     }
 
     @Test

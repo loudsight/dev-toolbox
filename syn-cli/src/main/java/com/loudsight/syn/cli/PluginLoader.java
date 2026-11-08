@@ -45,24 +45,39 @@ public final class PluginLoader {
      * instantiated is reported to {@code warn} and skipped: one broken plugin must not take down syn.
      */
     public static List<Provided> discover(Path pluginsDir, ClassLoader head, Consumer<String> warn) {
-        List<Provided> found = new ArrayList<>(load(head, Set.of(), BUILTIN, warn));
+        return services(SynCommand.class, pluginsDir, head, warn).stream()
+                .map(service -> new Provided(service.service(), service.origin()))
+                .toList();
+    }
+
+    /** A discovered service of some type and where it came from. */
+    public record Service<T>(T service, String origin) {
+    }
+
+    /**
+     * Every provider of {@code type} reachable, builtin first then plugins by name, loaded as {@link #discover} loads
+     * commands. A provider that cannot be loaded, including one linked against a head it no longer matches
+     * ({@link LinkageError}), is reported to {@code warn} and skipped.
+     */
+    public static <T> List<Service<T>> services(Class<T> type, Path pluginsDir, ClassLoader head, Consumer<String> warn) {
+        List<Service<T>> found = new ArrayList<>(load(type, head, Set.of(), BUILTIN, warn));
         // A plugin's loader also sees the head's providers through its parent: those are not the plugin's.
-        Set<Class<?>> headTypes = found.stream().map(provided -> provided.command().getClass()).collect(Collectors.toSet());
+        Set<Class<?>> headTypes = found.stream().map(provided -> provided.service().getClass()).collect(Collectors.toSet());
         if (Files.isDirectory(pluginsDir)) {
             for (Path plugin : plugins(pluginsDir)) {
                 Path current = plugin.resolve("current");
                 if (Files.isDirectory(current)) {
                     String name = Objects.requireNonNull(plugin.getFileName()).toString();
-                    found.addAll(load(classLoaderFor(current, head), headTypes, name, warn));
+                    found.addAll(load(type, classLoaderFor(current, head), headTypes, name, warn));
                 }
             }
         }
         return found;
     }
 
-    private static List<Provided> load(ClassLoader loader, Set<Class<?>> headTypes, String origin, Consumer<String> warn) {
-        List<Provided> found = new ArrayList<>();
-        Iterator<ServiceLoader.Provider<SynCommand>> providers = ServiceLoader.load(SynCommand.class, loader).stream().iterator();
+    private static <T> List<Service<T>> load(Class<T> type, ClassLoader loader, Set<Class<?>> headTypes, String origin, Consumer<String> warn) {
+        List<Service<T>> found = new ArrayList<>();
+        Iterator<ServiceLoader.Provider<T>> providers = ServiceLoader.load(type, loader).stream().iterator();
         int failures = 0;
         boolean more = true;
         while (more && failures < MAX_FAILURES) {
@@ -71,17 +86,27 @@ public final class PluginLoader {
             try {
                 more = providers.hasNext();
                 if (more) {
-                    ServiceLoader.Provider<SynCommand> provider = providers.next();
+                    ServiceLoader.Provider<T> provider = providers.next();
                     if (!headTypes.contains(provider.type())) {
-                        found.add(new Provided(provider.get(), origin));
+                        found.add(new Service<>(provider.get(), origin));
                     }
                 }
             } catch (ServiceConfigurationError e) {
                 failures++;
-                warn.accept("skipping a command from " + origin + ": " + e.getMessage());
+                // ServiceLoader wraps a class that fails to link; say so, a stale plugin is the usual cause.
+                warn.accept(e.getCause() instanceof LinkageError linkage ? linkageMessage(type, origin, linkage)
+                        : "skipping a " + type.getSimpleName() + " from " + origin + ": " + e.getMessage());
+            } catch (LinkageError e) {
+                failures++;
+                warn.accept(linkageMessage(type, origin, e));
             }
         }
         return found;
+    }
+
+    private static String linkageMessage(Class<?> type, String origin, LinkageError error) {
+        return "skipping a " + type.getSimpleName() + " from " + origin + ": it does not link against this syn head (" + error
+                + "); the plugin was probably built against a different head, rebuild it or update syn";
     }
 
     private static List<Path> plugins(Path pluginsDir) {

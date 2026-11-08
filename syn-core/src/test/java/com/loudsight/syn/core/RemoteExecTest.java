@@ -1,9 +1,11 @@
 package com.loudsight.syn.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.loudsight.scriptkit.Cmd;
+import com.loudsight.syn.spi.HostSync;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -62,6 +64,33 @@ class RemoteExecTest {
         String script = RemoteExec.script("/x", List.of("a"));
 
         assertTrue(!script.contains("flock") && !script.contains("git pull"), script);
+    }
+
+    private static final HostSync CUSTOM = new HostSync() {
+        @Override
+        public String envPrelude() {
+            return "source /etc/custom-env.sh\nexport WORK_ROOT=/srv";
+        }
+
+        @Override
+        public String syncFragment() {
+            return "echo custom-sync\n";
+        }
+    };
+
+    @Test
+    void aProvidedHostSyncReplacesThePreludeAndTheSyncFragment() {
+        String plain = RemoteExec.script("/x", List.of("a"), false, CUSTOM);
+        String sync = RemoteExec.script("/x", List.of("a"), true, CUSTOM);
+
+        assertEquals("source /etc/custom-env.sh && export WORK_ROOT=/srv && cd /x && scripts/syn a", plain);
+        assertEquals("source /etc/custom-env.sh\nexport WORK_ROOT=/srv\nset -e\ncd /x\necho custom-sync\nscripts/syn a\n", sync);
+    }
+
+    @Test
+    void aRequestWithoutAHostSyncFallsBackToTheDefault() {
+        assertSame(RemoteExec.DEFAULT_HOST_SYNC, new RemoteExec.Request("h", "/x", List.of("a"), true, false).hostSync());
+        assertSame(CUSTOM, new RemoteExec.Request("h", "/x", List.of("a"), true, false, CUSTOM).hostSync());
     }
 
     @Test

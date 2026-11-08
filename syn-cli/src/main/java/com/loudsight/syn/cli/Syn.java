@@ -11,6 +11,7 @@ import com.loudsight.syn.core.TierGuard;
 import com.loudsight.syn.spi.CommandDescriptor;
 import com.loudsight.syn.spi.CommandExit;
 import com.loudsight.syn.spi.ExitCodes;
+import com.loudsight.syn.spi.HostSync;
 import com.loudsight.syn.spi.SynCommand;
 import com.loudsight.syn.spi.Tier;
 import com.loudsight.useful.helper.logging.LoggingHelper;
@@ -148,26 +149,31 @@ public final class Syn {
                 err.println("syn: skipping " + provided.command().getClass().getName() + " from " + provided.origin() + ": " + e.getMessage());
             }
         }
+        SynConfig config = SynConfig.load(repoRoot);
         PluginConflicts.Resolution<CommandLine> resolution = PluginConflicts.resolve(candidates,
-                SynConfig.load(repoRoot).withPrefix(PluginConflicts.OVERRIDE_PREFIX));
+                HostSyncChoice.withoutHostSync(config.withPrefix(PluginConflicts.OVERRIDE_PREFIX)));
         for (PluginConflicts.Candidate<CommandLine> kept : resolution.kept()) {
             commandLine.addSubcommand(kept.name(), kept.item());
             origins.put(kept.name(), kept.origin());
         }
-        String pluginReport = PluginConflicts.report(pluginsDir, candidates, resolution);
+        HostSyncChoice hostSync = HostSyncChoice.resolve(
+                PluginLoader.services(HostSync.class, pluginsDir, Thread.currentThread().getContextClassLoader(), message -> err.println("syn: " + message)), config);
+        String pluginReport = PluginConflicts.report(pluginsDir, candidates, resolution) + System.lineSeparator() + System.lineSeparator() + hostSync.report();
+        List<String> problems = new ArrayList<>(resolution.problems());
+        problems.addAll(hostSync.problems());
 
         described.set(describe(commandLine, origins));
         // After the subcommands are added: picocli hands the writers only to the subcommands present at the time.
         commandLine.setOut(new PrintWriter(out, true, StandardCharsets.UTF_8));
         commandLine.setErr(new PrintWriter(err, true, StandardCharsets.UTF_8));
-        commandLine.setExecutionStrategy(parseResult -> execute(parseResult, root, new Session(repoRoot, out, err, interactive, catalog, onRemote, remote, pluginReport, resolution.problems())));
+        commandLine.setExecutionStrategy(parseResult -> execute(parseResult, root, new Session(repoRoot, out, err, interactive, catalog, onRemote, remote, pluginReport, problems, hostSync)));
         return commandLine.execute(onRemote.args().toArray(String[]::new));
     }
 
     /** What one invocation runs against, apart from the parsed arguments. */
     private record Session(Path repoRoot, PrintStream out, PrintStream err, boolean interactive,
                            Supplier<List<CommandDescriptor>> catalog, RemoteOption onRemote, Remote remote,
-                           String pluginReport, List<String> pluginProblems) {
+                           String pluginReport, List<String> pluginProblems, HostSyncChoice hostSync) {
     }
 
     private static int execute(ParseResult parseResult, Syn root, Session session) {
@@ -233,6 +239,10 @@ public final class Syn {
             session.err().println("syn: " + name + ": --on-remote refused: " + refusal.get());
             return ExitCodes.REFUSED;
         }
+        if (session.hostSync().refusal().isPresent()) {
+            session.err().println("syn: " + name + ": --on-remote refused: " + session.hostSync().refusal().get());
+            return ExitCodes.REFUSED;
+        }
         String host = DeployHost.resolveHost(session.onRemote().host());
         String checkout = DeployHost.checkout();
         boolean sync = session.onRemote().sync();
@@ -244,7 +254,7 @@ public final class Syn {
         // A command that changes things runs detached, so a dropped connection cannot end it half way; a read-only one just streams.
         boolean detach = tier != Tier.READ_ONLY;
         session.err().println("syn: " + name + " on " + host + ":" + checkout + (sync ? " (pulling first)" : "") + (detach ? " (detached)" : ""));
-        return session.remote().run(new RemoteExec.Request(host, checkout, session.onRemote().args(), sync, detach), session.out(), session.err());
+        return session.remote().run(new RemoteExec.Request(host, checkout, session.onRemote().args(), sync, detach, session.hostSync().hostSync()),session.out(), session.err());
     }
 
     private static List<CommandDescriptor> describe(CommandLine commandLine, Map<String, String> origins) {
