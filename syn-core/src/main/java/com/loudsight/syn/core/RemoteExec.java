@@ -2,6 +2,7 @@ package com.loudsight.syn.core;
 
 import com.loudsight.scriptkit.Cmd;
 import com.loudsight.scriptkit.Shell;
+import com.loudsight.syn.spi.HostSync;
 import java.io.PrintStream;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -41,13 +42,32 @@ public final class RemoteExec {
      *
      * @param sync whether the host pulls first ({@link HostPrep})
      * @param detach whether it runs as a {@link RemoteJob} that survives a dropped connection
+     * @param hostSync the host setup; {@link #DEFAULT_HOST_SYNC} unless a plugin supplies one
      */
-    public record Request(String host, String checkout, List<String> args, boolean sync, boolean detach) {
+    public record Request(String host, String checkout, List<String> args, boolean sync, boolean detach, HostSync hostSync) {
 
         public Request {
             args = List.copyOf(args);
         }
+
+        /** A request with the default host setup. */
+        public Request(String host, String checkout, List<String> args, boolean sync, boolean detach) {
+            this(host, checkout, args, sync, detach, DEFAULT_HOST_SYNC);
+        }
     }
+
+    /** The host setup used when no plugin supplies one: {@link HostPrep}, the env script, {@code WORK_ROOT=/opt}. */
+    public static final HostSync DEFAULT_HOST_SYNC = new HostSync() {
+        @Override
+        public String envPrelude() {
+            return "source " + HOST_ENV_SCRIPT + "\nexport WORK_ROOT=/opt";
+        }
+
+        @Override
+        public String syncFragment() {
+            return HostPrep.sync();
+        }
+    };
 
     /** The shell script run on the host: toolchain, the checkout, then {@code scripts/syn} with {@code args}. */
     public static String script(String checkout, List<String> args) {
@@ -56,13 +76,18 @@ public final class RemoteExec {
 
     /** As {@link #script(String, List)}; with {@code sync}, {@link HostPrep#sync()} runs in the checkout first. */
     public static String script(String checkout, List<String> args, boolean sync) {
+        return script(checkout, args, sync, DEFAULT_HOST_SYNC);
+    }
+
+    /** As {@link #script(String, List, boolean)}, with the host setup taken from {@code hostSync}. */
+    public static String script(String checkout, List<String> args, boolean sync, HostSync hostSync) {
         String syn = Stream.concat(Stream.of("scripts/syn"), args.stream()).map(Shell::quote).collect(Collectors.joining(" "));
+        String prelude = hostSync.envPrelude();
         if (!sync) {
-            return "source " + HOST_ENV_SCRIPT + " && export WORK_ROOT=/opt && cd " + Shell.quote(checkout) + " && " + syn;
+            return String.join(" && ", prelude.strip().split("\n")) + " && cd " + Shell.quote(checkout) + " && " + syn;
         }
         // Multi-line, under set -e from after the env script (which reads unset variables and may return non-zero).
-        return "source " + HOST_ENV_SCRIPT + "\nexport WORK_ROOT=/opt\nset -e\ncd " + Shell.quote(checkout) + "\n"
-                + HostPrep.sync() + syn + "\n";
+        return prelude.strip() + "\nset -e\ncd " + Shell.quote(checkout) + "\n" + hostSync.syncFragment() + syn + "\n";
     }
 
     /**
@@ -78,7 +103,7 @@ public final class RemoteExec {
 
     /** Runs the request, detached or streaming as it says; returns the command's exit code. */
     public static int run(Request request, PrintStream out, PrintStream err) throws InterruptedException {
-        String script = script(request.checkout(), request.args(), request.sync());
+        String script = script(request.checkout(), request.args(), request.sync(), request.hostSync());
         return request.detach() ? runDetached(request.host(), script, out, err) : Cmd.of(sshCommand(request.host(), script)).stream();
     }
 
