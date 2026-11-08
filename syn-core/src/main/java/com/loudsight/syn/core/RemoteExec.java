@@ -20,13 +20,9 @@ import java.util.stream.Stream;
  * changes things runs {@linkplain #runDetached detached} instead, so a dropped connection cannot end it half way.
  *
  * <p>By default nothing is pulled: the host runs whatever it has checked out, and {@link SyncCheck} says when that
- * differs from here. With {@code sync} the host first takes {@link HostPrep#sync()} (the lock, a refusal over hand edits,
- * the pull and the submodule update), and keeps the lock until the command ends so a deploy cannot pull mid-run.
+ * differs from here. With {@code sync} the host first runs the {@link HostSync#syncFragment()} in the checkout.
  */
 public final class RemoteExec {
-
-    /** The env script the deploy host sources for its toolchain (the one {@code syn deploy-run} sources there too). */
-    static final String HOST_ENV_SCRIPT = "/opt/myEnv.sh";
 
     /** Ssh gives up on a host that does not answer, and on a connection that has gone silent, rather than hang. */
     static final List<String> SSH_OPTIONS = List.of("-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3");
@@ -40,7 +36,7 @@ public final class RemoteExec {
     /**
      * One remote run.
      *
-     * @param sync whether the host pulls first ({@link HostPrep})
+     * @param sync whether the host pulls first ({@link HostSync#syncFragment()})
      * @param detach whether it runs as a {@link RemoteJob} that survives a dropped connection
      * @param hostSync the host setup; {@link #DEFAULT_HOST_SYNC} unless a plugin supplies one
      */
@@ -56,25 +52,15 @@ public final class RemoteExec {
         }
     }
 
-    /** The host setup used when no plugin supplies one: {@link HostPrep}, the env script, {@code WORK_ROOT=/opt}. */
-    public static final HostSync DEFAULT_HOST_SYNC = new HostSync() {
-        @Override
-        public String envPrelude() {
-            return "source " + HOST_ENV_SCRIPT + "\nexport WORK_ROOT=/opt";
-        }
-
-        @Override
-        public String syncFragment() {
-            return HostPrep.sync();
-        }
-    };
+    /** The host setup used when no plugin supplies one. */
+    public static final HostSync DEFAULT_HOST_SYNC = new GenericHostSync();
 
     /** The shell script run on the host: toolchain, the checkout, then {@code scripts/syn} with {@code args}. */
     public static String script(String checkout, List<String> args) {
         return script(checkout, args, false);
     }
 
-    /** As {@link #script(String, List)}; with {@code sync}, {@link HostPrep#sync()} runs in the checkout first. */
+    /** As {@link #script(String, List)}; with {@code sync}, the default host sync runs in the checkout first. */
     public static String script(String checkout, List<String> args, boolean sync) {
         return script(checkout, args, sync, DEFAULT_HOST_SYNC);
     }
@@ -83,11 +69,13 @@ public final class RemoteExec {
     public static String script(String checkout, List<String> args, boolean sync, HostSync hostSync) {
         String syn = Stream.concat(Stream.of("scripts/syn"), args.stream()).map(Shell::quote).collect(Collectors.joining(" "));
         String prelude = hostSync.envPrelude();
+        String lines = prelude.strip();
+        String before = lines.isEmpty() ? "" : String.join(" && ", lines.split("\n")) + " && ";
         if (!sync) {
-            return String.join(" && ", prelude.strip().split("\n")) + " && cd " + Shell.quote(checkout) + " && " + syn;
+            return before + "cd " + Shell.quote(checkout) + " && " + syn;
         }
-        // Multi-line, under set -e from after the env script (which reads unset variables and may return non-zero).
-        return prelude.strip() + "\nset -e\ncd " + Shell.quote(checkout) + "\n" + hostSync.syncFragment() + syn + "\n";
+        // Multi-line, under set -e from after the prelude (which may read unset variables or return non-zero).
+        return (lines.isEmpty() ? "" : lines + "\n") + "set -e\ncd " + Shell.quote(checkout) + "\n" + hostSync.syncFragment() + syn + "\n";
     }
 
     /**

@@ -46,8 +46,8 @@ import picocli.CommandLine.ScopeType;
         footer = {"",
                 "On any command: --on-remote[=<user@host>] runs the same command line on the deploy host, in its checkout"
                         + " (host: the value, else REMOTE_HOST, else DEPLOY_HOST). It pulls nothing and warns loudly when"
-                        + " the host's code differs from this machine's; add --sync to make the host pull origin/master and update"
-                        + " its submodules first (it refuses over hand edits on the host). Example:",
+                        + " the host's code differs from this machine's; add --sync to make the host pull and update its"
+                        + " submodules first (what that does is the host-sync provider's: a plain git pull by default). Example:",
                 "  syn build-run-modules --modules '*backend*' --on-remote --sync"})
 public final class Syn {
 
