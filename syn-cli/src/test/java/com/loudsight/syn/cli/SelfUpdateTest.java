@@ -6,10 +6,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.loudsight.syn.cli.SelfUpdate.State;
+import com.loudsight.syn.core.ReleaseLock;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -139,8 +146,8 @@ class SelfUpdateTest {
 
     @Test
     void aSuccessfulMavenRunPrintsNoMavenOutput() {
-        List<String> printed = new java.util.ArrayList<>();
-        List<Boolean> attempts = new java.util.ArrayList<>();
+        List<String> printed = new ArrayList<>();
+        List<Boolean> attempts = new ArrayList<>();
 
         SelfUpdate.mavenOrFail(List.of("package"), offline -> {
             attempts.add(offline);
@@ -153,11 +160,68 @@ class SelfUpdateTest {
 
     @Test
     void aFailedMavenRunPrintsBothAttemptsInFullAndThrows() {
-        List<String> printed = new java.util.ArrayList<>();
+        List<String> printed = new ArrayList<>();
 
         assertThrows(IllegalStateException.class, () -> SelfUpdate.mavenOrFail(List.of("package"),
                 offline -> new com.loudsight.scriptkit.Cmd.Result(1, offline ? "OFFLINE-FAIL;" : "ONLINE-FAIL;"), printed::add));
 
         assertEquals(List.of("OFFLINE-FAIL;ONLINE-FAIL;"), printed);
+    }
+
+    /** A release edits the sources syn hashes and builds the same modules: a syn started elsewhere must not rebuild under it. */
+    @Test
+    void aStaleCacheIsNotRebuiltWhileAReleaseHoldsTheLock(@TempDir Path repo) throws IOException {
+        SelfUpdate.Config config = staleCache(repo);
+        List<String> builds = new ArrayList<>();
+        List<String> reruns = new ArrayList<>();
+
+        OptionalInt result;
+        try (ReleaseLock _ = ReleaseLock.acquire(config.cache())) {
+            result = SelfUpdate.refresh(config, ignoredConfig -> builds.add("build"), ignoredConfig -> {
+                reruns.add("rerun");
+                return 0;
+            });
+        }
+
+        assertTrue(result.isEmpty(), "runs the cached build as it is");
+        assertEquals(List.of(), builds);
+        assertEquals(List.of(), reruns);
+        assertEquals("old", Files.readString(config.stamp()).strip(), "the stamp still says the cache is stale");
+    }
+
+    @Test
+    void aReleaseLockLeftByADeadProcessDoesNotStopTheRebuild(@TempDir Path repo) throws Exception {
+        SelfUpdate.Config config = staleCache(repo);
+        Process exited = new ProcessBuilder("true").start();
+        assertTrue(exited.waitFor(60, TimeUnit.SECONDS));
+        Files.writeString(ReleaseLock.path(config.cache()), "pid=" + exited.pid() + "\nstarted=" + ZonedDateTime.now(ZoneOffset.UTC).toInstant() + "\n");
+        List<String> builds = new ArrayList<>();
+
+        OptionalInt result = SelfUpdate.refresh(config, ignoredConfig -> builds.add("build"), ignoredConfig -> 3);
+
+        assertEquals(OptionalInt.of(3), result, "rebuilt and re-ran");
+        assertEquals(List.of("build"), builds);
+    }
+
+    @Test
+    void aStaleCacheIsRebuiltWhenNoReleaseHoldsTheLock(@TempDir Path repo) throws IOException {
+        SelfUpdate.Config config = staleCache(repo);
+        List<String> builds = new ArrayList<>();
+
+        OptionalInt result = SelfUpdate.refresh(config, ignoredConfig -> builds.add("build"), ignoredConfig -> 0);
+
+        assertEquals(OptionalInt.of(0), result);
+        assertEquals(List.of("build"), builds);
+        assertFalse(Files.exists(config.cache().resolve(ReleaseLock.BUILD_LOCK)), "the build lock is released");
+    }
+
+    /** A cache whose stamp no longer matches its one source directory. */
+    private static SelfUpdate.Config staleCache(Path repo) throws IOException {
+        Path cache = repo.resolve(".syn-cache");
+        Files.createDirectories(cache.resolve("lib"));
+        Files.writeString(cache.resolve("stamp"), "old\n");
+        Files.createDirectories(repo.resolve("src"));
+        Files.writeString(repo.resolve("src/A.java"), "class A {}\n");
+        return new SelfUpdate.Config(repo, cache, "pom.xml", List.of("src"), false, cache.resolve("plugins"));
     }
 }
