@@ -3,6 +3,7 @@ package com.loudsight.syn.cli;
 import com.loudsight.scriptkit.Cmd;
 import com.loudsight.syn.core.ContentHasher;
 import com.loudsight.syn.core.DirLock;
+import com.loudsight.syn.core.ReleaseLock;
 import com.loudsight.useful.helper.logging.LoggingHelper;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -11,7 +12,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -21,6 +21,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.ToIntFunction;
 import java.util.stream.Stream;
 
 /**
@@ -39,6 +40,7 @@ import java.util.stream.Stream;
  *   <li>{@code syn.plugins} - when set, the reactor's plugin modules are built into {@code <cache>/plugins}
  *       too, through the {@code syn.plugins.dir} profile of their parent.</li>
  * </ul>
+ * While a release holds the {@link ReleaseLock} in the cache, a stale head is run as it is and not rebuilt.
  */
 final class SelfUpdate {
 
@@ -61,7 +63,6 @@ final class SelfUpdate {
     private static final List<String> FORWARDED = List.of(CACHE_PROPERTY, POM_PROPERTY, SOURCES_PROPERTY, PLUGINS_PROPERTY, PLUGINS_DIR_PROPERTY, LOGBACK_PROPERTY);
 
     private static final LoggingHelper LOGGER = LoggingHelper.wrap(SelfUpdate.class);
-    private static final Duration STALE_LOCK = Duration.ofMinutes(5);
 
     /** What the stamp says about the cached build. */
     enum State {
@@ -140,7 +141,15 @@ final class SelfUpdate {
         if (configured.isEmpty()) {
             return OptionalInt.empty();
         }
-        Config config = configured.get();
+        return refresh(configured.get(), SelfUpdate::build, config -> rerun(config, args));
+    }
+
+    /**
+     * {@link #refresh(Path, String...)} once configured, with the rebuild and the re-run given. While a release holds the
+     * {@link ReleaseLock} the cached build runs as it is, stale or not: the release is editing and building those sources.
+     */
+    static OptionalInt refresh(Config config, Consumer<Config> rebuild, ToIntFunction<Config> rerun) {
+        Path repoRoot = config.repoRoot();
         Optional<String> fingerprint = new ContentHasher(repoRoot).hashModules(config.sources());
         if (fingerprint.isEmpty()) {
             LOGGER.logWarn("cannot fingerprint the sources {} under {}; not checking for updates", config.sources(), repoRoot);
@@ -159,19 +168,33 @@ final class SelfUpdate {
             LOGGER.logWarn("syn is still stale after a rebuild; running it as it is");
             return OptionalInt.empty();
         }
-        try (DirLock _ = DirLock.acquire(config.cache().resolve(".build.lock"), STALE_LOCK)) {
+        if (releaseInProgress(config)) {
+            return OptionalInt.empty();
+        }
+        try (DirLock _ = DirLock.acquire(config.cache().resolve(ReleaseLock.BUILD_LOCK), ReleaseLock.BUILD_LOCK_STALE)) {
+            // A release may have started while this one waited for the lock (it waits for this lock in turn).
+            if (releaseInProgress(config)) {
+                return OptionalInt.empty();
+            }
             // Another syn may have rebuilt while this one waited for the lock.
             boolean rebuilt = artifactsPresent(config) && readStamp(config.stamp()).filter(stamp -> sameHash(stamp, current)).isPresent();
             if (!rebuilt) {
                 LOGGER.logWarn("sources changed, rebuilding syn");
-                build(config);
+                rebuild.accept(config);
                 writeStamp(config.stamp(), current);
             }
         } catch (IllegalStateException | UncheckedIOException | Cmd.CmdException e) {
             LOGGER.logError("could not rebuild syn - not running a build that differs from its sources: " + e.getMessage(), e);
             return OptionalInt.of(1);
         }
-        return OptionalInt.of(rerun(config, args));
+        return OptionalInt.of(rerun.applyAsInt(config));
+    }
+
+    private static boolean releaseInProgress(Config config) {
+        Optional<ReleaseLock.Holder> holder = ReleaseLock.liveHolder(config.cache());
+        holder.ifPresent(release -> LOGGER.logWarn("sources changed, but a release holds {} (pid {} since {}); running syn as it is, not rebuilding",
+                ReleaseLock.path(config.cache()), release.pid(), release.started()));
+        return holder.isPresent();
     }
 
     private static boolean artifactsPresent(Config config) {
