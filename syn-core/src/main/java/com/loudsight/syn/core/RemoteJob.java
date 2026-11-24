@@ -7,6 +7,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -40,18 +41,37 @@ public final class RemoteJob {
     private final Transport transport;
     private final long retryMillis;
     private final String directory;
+    private final List<String> pollOptions;
 
     public RemoteJob(String host, String runId, Consumer<String> say) {
-        this(host, runId, say, Transport.real(), 15_000, "/tmp");
+        this(host, runId, say, RemoteExec.DEFAULT_CONNECT_TIMEOUT_SECONDS);
+    }
+
+    /** A job whose polls give ssh {@code connectSeconds} to connect (see {@link RemoteExec#connectTimeout}). */
+    public RemoteJob(String host, String runId, Consumer<String> say, int connectSeconds) {
+        this(host, runId, say, Transport.real(), 15_000, "/tmp", connectSeconds);
     }
 
     public RemoteJob(String host, String runId, Consumer<String> say, Transport transport, long retryMillis, String directory) {
+        this(host, runId, say, transport, retryMillis, directory, RemoteExec.DEFAULT_CONNECT_TIMEOUT_SECONDS);
+    }
+
+    public RemoteJob(String host, String runId, Consumer<String> say, Transport transport, long retryMillis, String directory, int connectSeconds) {
         this.host = host;
         this.runId = runId;
         this.say = say;
         this.transport = transport;
         this.retryMillis = retryMillis;
         this.directory = directory;
+        this.pollOptions = RemoteExec.sshOptions(connectSeconds);
+    }
+
+    /** {@code ssh OPTIONS host command}, the poll shape: ConnectTimeout and ServerAlive options first. */
+    private Cmd poll(String command) {
+        List<String> argv = new ArrayList<>(List.of(transport.ssh()));
+        argv.addAll(pollOptions);
+        argv.addAll(List.of(host, command));
+        return Cmd.of(argv);
     }
 
     /** {@code /tmp/<runId>}: the prefix of every file this job keeps on the host. */
@@ -94,8 +114,7 @@ public final class RemoteJob {
         String command = "test -f " + donePath() + " && echo DONE || echo RUNNING"
                 + (probe.isBlank() ? "" : "; echo '" + PROBE_MARKER + "'; { " + probe + "; } 2>/dev/null || true");
         while (true) {
-            Cmd.Result status = Cmd.of(transport.ssh(), "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", host,
-                    command).stdin("").discardErr().capture();
+            Cmd.Result status = poll(command).stdin("").discardErr().capture();
             if (status.ok()) {
                 String output = status.stdout();
                 int marker = output.indexOf(PROBE_MARKER);
@@ -122,8 +141,7 @@ public final class RemoteJob {
         while (true) {
             String command = "if [ -f " + logPath() + " ]; then tail -c +" + (offset + 1) + " " + logPath() + "; fi; printf '" + STATE_MARKER.replace("\n", "\\n")
                     + "'; if [ -f " + donePath() + " ]; then echo DONE; else echo RUNNING; fi";
-            Cmd.Result poll = Cmd.of(transport.ssh(), "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", host, command)
-                    .stdin("").discardErr().capture();
+            Cmd.Result poll = poll(command).stdin("").discardErr().capture();
             if (poll.ok()) {
                 Chunk chunk = Chunk.parse(poll.stdout());
                 if (chunk != null) {
