@@ -46,10 +46,27 @@ class RemoteExecTest {
     void sshRunsTheScriptAsOneQuotedArgumentOfBashCWithTimeouts() {
         List<String> ssh = RemoteExec.sshCommand("deploy@host.invalid", "cd /x && syn a");
 
-        assertEquals(List.of("ssh", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
+        assertEquals(List.of("ssh", "-o", "ConnectTimeout=60", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
                 "deploy@host.invalid", "bash", "-c"), ssh.subList(0, 10));
         assertEquals(11, ssh.size());
         assertEquals("'cd /x && syn a'", ssh.get(10));
+    }
+
+    /** A cold connect through a tunnel ProxyCommand took up to 12.5 s: the connect timeout is a setting, 60 s unless set. */
+    @Test
+    void theConnectTimeoutIsSixtySecondsUnlessTheRepoConfiguresIt(@org.junit.jupiter.api.io.TempDir java.nio.file.Path root)
+            throws java.io.IOException {
+        assertEquals(60, RemoteExec.connectTimeout(root));
+        java.nio.file.Files.createDirectory(root.resolve(".syn"));
+        java.nio.file.Path config = root.resolve(".syn/config.properties");
+        java.nio.file.Files.writeString(config, RemoteExec.CONNECT_TIMEOUT_KEY + "=90\n");
+        assertEquals(90, RemoteExec.connectTimeout(root));
+        assertTrue(RemoteExec.sshCommand("h", "true", 90).contains("ConnectTimeout=90"));
+        assertEquals(60, new RemoteExec.Request("h", "/x", List.of("a"), false, false).connectTimeoutSeconds());
+        java.nio.file.Files.writeString(config, RemoteExec.CONNECT_TIMEOUT_KEY + "=0\n");
+        assertEquals(60, RemoteExec.connectTimeout(root), "not positive: the default");
+        java.nio.file.Files.writeString(config, RemoteExec.CONNECT_TIMEOUT_KEY + "=soon\n");
+        assertEquals(60, RemoteExec.connectTimeout(root), "not a number: the default");
     }
 
     @Test

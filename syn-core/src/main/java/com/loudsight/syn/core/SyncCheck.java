@@ -127,7 +127,8 @@ public final class SyncCheck {
     /** The lines to print before running on {@code host}: the loud block, then any notes; empty when they match. */
     public static List<String> warning(Path repoRoot, String host, String checkout, Set<String> ignored) {
         Cmd.Result local = Cmd.of("bash", "-c", STATE_SCRIPT).dir(repoRoot).capture();
-        Cmd.Result remote = Cmd.of(RemoteExec.sshCommand(host, "cd " + Shell.quote(checkout) + " && " + STATE_SCRIPT))
+        Cmd.Result remote = Cmd.of(RemoteExec.sshCommand(host, "cd " + Shell.quote(checkout) + " && " + STATE_SCRIPT,
+                RemoteExec.connectTimeout(repoRoot)))
                 .capture();
         if (!local.ok() || !remote.ok()) {
             return block("WARNING: could not compare this machine with " + host + " - it may not be running the code here",

@@ -65,6 +65,32 @@ class RemoteJobTest {
         return out.toString(StandardCharsets.UTF_8);
     }
 
+    /**
+     * Every poll gives ssh the job's connect timeout, never the former fixed 10 s (a cold tunnel connect took up to
+     * 12.5 s): a recording stand-in logs each ssh call's arguments, then runs it as the plain stand-in does.
+     */
+    @Test
+    void pollsCarryTheConfiguredConnectTimeout() throws Exception {
+        Path calls = temp.resolve("ssh-calls.txt");
+        Path recording = temp.resolve("bin/recording-ssh");
+        write(recording, "#!/bin/bash\nprintf '%s\\n' \"$*\" >> '" + calls + "'\nexec '" + transport.ssh() + "' \"$@\"\n");
+        RemoteJob.Transport recorded = new RemoteJob.Transport(recording.toString(), transport.scp());
+        RemoteJob job = new RemoteJob("host.invalid", "job-t", said::add, recorded, 10, directory.toString(), 45);
+        job.launch("echo polled\n");
+        job.awaitDone(50);
+        job.awaitDoneStreaming(50, new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
+
+        List<String> polls = Files.readAllLines(calls).stream().filter(line -> line.contains("ServerAliveInterval")).toList();
+        assertTrue(polls.stream().anyMatch(line -> line.contains("echo DONE || echo RUNNING")), String.join("\n", polls));
+        assertTrue(polls.stream().anyMatch(line -> line.contains("@@SYN-STATE@@")), String.join("\n", polls));
+        assertTrue(polls.stream().allMatch(line -> line.startsWith("-o ConnectTimeout=45 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 host.invalid ")),
+                String.join("\n", polls));
+
+        new RemoteJob("host.invalid", "job-t", said::add, recorded, 10, directory.toString()).awaitDone(50);
+        List<String> all = Files.readAllLines(calls);
+        assertTrue(all.get(all.size() - 1).startsWith("-o ConnectTimeout=60 "), "unset: the 60 s default, got " + all.get(all.size() - 1));
+    }
+
     @Test
     void aJobRunsDetachedItsLogComesDownItsExitCodeIsReadAndItsFilesAreRemoved() throws Exception {
         RemoteJob job = job("job-a");

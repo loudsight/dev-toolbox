@@ -25,8 +25,16 @@ import java.util.stream.Stream;
  */
 public final class RemoteExec {
 
-    /** Ssh gives up on a host that does not answer, and on a connection that has gone silent, rather than hang. */
-    static final List<String> SSH_OPTIONS = List.of("-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3");
+    /**
+     * {@code remote.ssh.connect-timeout} in the repo's syn settings: seconds ssh waits for a connection, banner exchange
+     * included. WHY a setting with a long default: a cold connect through a tunnel ProxyCommand took 4.6 s
+     * to 12.5 s (2026-11-23), so the former fixed 10 s failed tunnelled calls; a dead host is still caught by the
+     * ServerAlive options once connected.
+     */
+    public static final String CONNECT_TIMEOUT_KEY = "remote.ssh.connect-timeout";
+
+    /** The connect timeout when {@link #CONNECT_TIMEOUT_KEY} is unset or not a positive whole number. */
+    public static final int DEFAULT_CONNECT_TIMEOUT_SECONDS = 60;
 
     /** How often a detached run is polled for new output. */
     private static final long POLL_MILLIS = 2_000;
@@ -41,11 +49,18 @@ public final class RemoteExec {
      * @param detach whether it runs as a {@link RemoteJob} that survives a dropped connection
      * @param hostSync the host setup; {@link #DEFAULT_HOST_SYNC} unless a plugin supplies one
      * @param launcher the command that starts syn in the host's checkout; see {@link #launcher}
+     * @param connectTimeoutSeconds ssh's ConnectTimeout; see {@link #connectTimeout}
      */
-    public record Request(String host, String checkout, List<String> args, boolean sync, boolean detach, HostSync hostSync, String launcher) {
+    public record Request(String host, String checkout, List<String> args, boolean sync, boolean detach, HostSync hostSync, String launcher,
+                          int connectTimeoutSeconds) {
 
         public Request {
             args = List.copyOf(args);
+        }
+
+        /** A request with the default connect timeout. */
+        public Request(String host, String checkout, List<String> args, boolean sync, boolean detach, HostSync hostSync, String launcher) {
+            this(host, checkout, args, sync, detach, hostSync, launcher, DEFAULT_CONNECT_TIMEOUT_SECONDS);
         }
 
         /** A request with the default launcher. */
@@ -65,6 +80,25 @@ public final class RemoteExec {
     /** {@code remote.launcher} in the repo's syn settings (e.g. {@code scripts/syn}, relative to the checkout), else {@link #DEFAULT_LAUNCHER}. */
     public static String launcher(Path repoRoot) {
         return SynConfig.load(repoRoot).get("remote.launcher").orElse(DEFAULT_LAUNCHER);
+    }
+
+    /** {@link #CONNECT_TIMEOUT_KEY} in the repo's syn settings when a positive whole number, else {@link #DEFAULT_CONNECT_TIMEOUT_SECONDS}. */
+    public static int connectTimeout(Path repoRoot) {
+        return connectTimeout(SynConfig.load(repoRoot));
+    }
+
+    static int connectTimeout(SynConfig config) {
+        try {
+            int seconds = Integer.parseInt(config.get(CONNECT_TIMEOUT_KEY).orElse("").strip());
+            return seconds > 0 ? seconds : DEFAULT_CONNECT_TIMEOUT_SECONDS;
+        } catch (NumberFormatException ignored) {
+            return DEFAULT_CONNECT_TIMEOUT_SECONDS;
+        }
+    }
+
+    /** Ssh gives up on a host that does not answer in {@code connectSeconds}, and on a connection gone silent, rather than hang. */
+    public static List<String> sshOptions(int connectSeconds) {
+        return List.of("-o", "ConnectTimeout=" + connectSeconds, "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3");
     }
 
     /** The host setup used when no plugin supplies one. */
@@ -103,8 +137,13 @@ public final class RemoteExec {
      * itself, and an interactive shell without a terminal only adds "no job control" noise to stderr.
      */
     public static List<String> sshCommand(String host, String script) {
+        return sshCommand(host, script, DEFAULT_CONNECT_TIMEOUT_SECONDS);
+    }
+
+    /** As {@link #sshCommand(String, String)} with ConnectTimeout {@code connectSeconds}. */
+    public static List<String> sshCommand(String host, String script, int connectSeconds) {
         List<String> ssh = new ArrayList<>(List.of("ssh"));
-        ssh.addAll(SSH_OPTIONS);
+        ssh.addAll(sshOptions(connectSeconds));
         ssh.addAll(List.of(host, "bash", "-c", Shell.quote(script)));
         return ssh;
     }
@@ -112,13 +151,15 @@ public final class RemoteExec {
     /** Runs the request, detached or streaming as it says; returns the command's exit code. */
     public static int run(Request request, PrintStream out, PrintStream err) throws InterruptedException {
         String script = script(request.checkout(), request.args(), request.sync(), request.hostSync(), request.launcher());
-        return request.detach() ? runDetached(request.host(), script, out, err) : Cmd.of(sshCommand(request.host(), script)).stream();
+        return request.detach()
+                ? runDetached(request.host(), script, request.connectTimeoutSeconds(), out, err)
+                : Cmd.of(sshCommand(request.host(), script, request.connectTimeoutSeconds())).stream();
     }
 
-    private static int runDetached(String host, String script, PrintStream out, PrintStream err) throws InterruptedException {
+    private static int runDetached(String host, String script, int connectSeconds, PrintStream out, PrintStream err) throws InterruptedException {
         String runId = "syn-" + LocalDateTime.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss", Locale.ROOT))
                 + "-" + ProcessHandle.current().pid();
-        RemoteJob job = new RemoteJob(host, runId, err::println);
+        RemoteJob job = new RemoteJob(host, runId, err::println, connectSeconds);
         job.launch(script);
         err.println("syn: detached on " + host + " as " + runId + " (survives a dropped connection); log " + job.logPath());
         job.awaitDoneStreaming(POLL_MILLIS, out);
